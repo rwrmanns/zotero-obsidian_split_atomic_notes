@@ -8,11 +8,8 @@ This script serves to split a input obsidian_zotero s_content (aka 'source_note.
 Zotero Item Types and Fields:
     https://www.zotero.org/support/kb/item_types_and_fields
 
-    https://github.com/alex-kline/obsidian-zotero.git
-
-    https://github.com/alex-kline/obsidian-zotero/blob/main/split_in_atomic_notes.py
-    python 3.12 (obsidian-zotero)
-
+github repository:
+    https://github.com/rwrmanns/zotero-obsidian_split_atomic_notes
 
 '''
 import collections
@@ -994,6 +991,15 @@ def get_l_fn_note_with_citekey(s_note_source_citekey: str) -> list[str]:
 
 
 """
+obsidian:
+Obsidian 'Zotero Integration Plugin':
+   >san_nunjucks.nunjucks< (== >san_nunjucks.md<)  template to import >source note< from zotero.
+
+Obsidian 'Shell commands plugin':
+   calls >san.exe< (== >split annotation note.py<) to split >source note< into obsidian atomic notes.    
+
+------------------------------------------------------------------------------------------------------------------------
+
 zotero-Zitationen sind erstmals lediglich bibliographische Quellenangaben + evtl. die gesamte Quelle + evtl. Zitate daraus +/- Kommentare ==
 zotero-citations  are                     citations                       + evtl. citation           + evtl. citation      +/- annotation ==
 
@@ -1100,15 +1106,6 @@ angefügt werden und die s_content ein weiteres mal nach obsidian importiert wir
 Das nunjucks-Template sorgt nun dafür, dass an die schon vorhandene obsidian_zotero s_content nur neue Zitate (annotations)
 angefügt werden und bestehende annotations nicht verändert werden. (HOFFENTLICH!).
 
-2. In Abhängigkeit von der Version des nunjucks-Templates sind die _Annotationen_ unterschiedlich formatiert:
-vs 0.0:
-  H2 (Hash der Annotation) wird unmittelbar von H6 Header (Überschrift der Annotation) gefolgt.
-  H3 Kommentar
-
-vs 0.2:
-  H6 (Hash der Annotation) wird unmittelbar von H2 Header (Überschrift der Annotation) gefolgt.
-  H3 Kommentar
-  H3 Tags
 """
 
 def b_check_path_exists(l_path: list[Path]):
@@ -1160,17 +1157,15 @@ if __name__ == '__main__':
 #  >san.py< & >san.nunjucks< into
 #   - one common directory and
 #   - one common git repository (local and github).
-#   - update doc >san.py< concerning github repository.
 
 # ToDo:
 #  >san.py<  in *.exe verwandeln
 #       >_ pip install pyinstaller
-#       >_ pyinstaller --onefile -w 'filename.py'
+#       >_
+#       >_ pyinstaller --onefile -w 'san.py'
 
 # nb:
-#  Configuration
-#  Call >san.exe< via shortcut in obsidian:
-#    Use community plugin: 'Shell commands'
+#  Obsidian community plugin: 'Shell commands' calls >san.exe< via shortcut
 #    https://github.com/Taitava/obsidian-shellcommands
 #    .
 #    ctrl-P > Shell commands: Execute Split Into Annotation Notes (SAN)
