@@ -36,8 +36,8 @@ def find_files_with_extension(root, extension):
 
 def get_l_s_QA_deck(content, rgx_QA_DECK, fixed_QA_prefix):
     deck_matches = rgx_QA_DECK.findall(content)
-    l_s_QA_deck = [m[len(fixed_QA_prefix):] if m.startswith(fixed_QA_prefix) else m for m in deck_matches]
-    return l_s_QA_deck
+    lo_QA_deck = [m[len(fixed_QA_prefix):] if m.startswith(fixed_QA_prefix) else m for m in deck_matches]
+    return lo_QA_deck
 
 def files_are_identical(path1, content2):
     if not os.path.isfile(path1):
@@ -46,8 +46,8 @@ def files_are_identical(path1, content2):
         content1 = f1.read()
     return content1 == content2
 
-def process_files(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK):
-    result = []
+def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK):
+    lo_qa_entry = []
     for file_path in file_paths:
         try:
             post = frontmatter.load(file_path)
@@ -64,20 +64,20 @@ def process_files(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_Q
             continue
 
         fixed_QA_prefix = "#QA_DECK_"
-        l_s_QA_deck = get_l_s_QA_deck(content, rgx_QA_DECK, fixed_QA_prefix)
+        lo_QA_deck = get_l_s_QA_deck(content, rgx_QA_DECK, fixed_QA_prefix)
 
         metadata = post.metadata
-        zotero_hash = None
+        qa_hash = None
         if 'san' in metadata and isinstance(metadata['san'], dict):
             candidate = metadata['san'].get('zotero_hash')
             if candidate and rgx_QA_hash.fullmatch(candidate):
-                zotero_hash = candidate
+                qa_hash = candidate
 
-        if not zotero_hash:
-            zotero_hash = generate_random_hash()
+        if not qa_hash:
+            qa_hash = generate_random_hash()
             if 'san' not in metadata or not isinstance(metadata['san'], dict):
                 metadata['san'] = {}
-            metadata['san']['zotero_hash'] = zotero_hash
+            metadata['san']['zotero_hash'] = qa_hash
             post.metadata = metadata
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(frontmatter.dumps(post))
@@ -99,14 +99,14 @@ def process_files(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_Q
 
                 if multiple_matches:
                     candidate_idx = idx
-                    insert_str_no_paren = f'{zotero_hash}_{candidate_idx}'
+                    insert_str_no_paren = f'{qa_hash}_{candidate_idx}'
                     while insert_str_no_paren in l_QA_hash:
                         candidate_idx += 1
-                        insert_str_no_paren = f'{zotero_hash}_{candidate_idx}'
+                        insert_str_no_paren = f'{qa_hash}_{candidate_idx}'
 
                     insert_str = f'({insert_str_no_paren})\n'
                 else:
-                    insert_str = f'({zotero_hash})\n'
+                    insert_str = f'({qa_hash})\n'
 
                 modified_content = re.sub(
                     rf'({escaped_match})',
@@ -147,17 +147,15 @@ def process_files(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_Q
                 f_new.write(full_new_content)
             print(f"File written: {new_file_path}")
 
-        qa_match = rgx_QA_pattern.search(content)
-
-        entry = {
+        qa_entry = {
             'path': file_path,
             'target': target_matches if target_matches else None,
-            'hash': zotero_hash,
-            'qa': qa_match.group(0) if qa_match else None,
-            'l_s_QA_deck': l_s_QA_deck,
+            'qa_hash': qa_hash,
+            'QA': qa_match.group(0) if (qa_match := rgx_QA_pattern.search(content)) else None,
+            'lo_QA_deck': lo_QA_deck,
         }
-        result.append(entry)
-    return result
+        lo_qa_entry.append(qa_entry)
+    return lo_qa_entry
 
 def get_lo_qa_card(p_QA):
     prefix = 'TARGET DECK: '
@@ -193,7 +191,7 @@ def get_lo_qa_card(p_QA):
         lo_s_qa = [m.group(0) for m in chunk_pattern.finditer(content)]
 
         lo_qa_card.append({
-            'deck': s_deck,
+            'QA_deck': s_deck,
             'file_path': p_fn_qa,
             'chunks': lo_s_qa,
         })
@@ -205,11 +203,11 @@ def main():
     p_root, ext, p_QA, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK = load_config(ini_path)
 
     all_files = find_files_with_extension(p_root, ext)
-    dts = process_files(all_files, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK)
+    lo_qa_entry = get_lo_qa_entry(all_files, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK)
 
     lo_qa_card = get_lo_qa_card(p_QA)
 
-    for entry in dts:
+    for entry in lo_qa_entry:
         print(entry)
 
     for qa_card in lo_qa_card:
