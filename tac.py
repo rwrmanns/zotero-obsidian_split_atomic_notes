@@ -81,13 +81,27 @@ def process_files(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_Q
         modified_content = content
         multiple_matches = len(target_matches) > 1
 
+        # Build a list of all existing hashes in content
+        l_QA_hash = rgx_QA_hash.findall(content)
+
         for idx, match in enumerate(target_matches, start=1):
             if not rgx_QA_hash.search(match):
                 escaped_match = re.escape(match)
+
                 if multiple_matches:
-                    insert_str = f'({zotero_hash}_{idx})\n'
+                    candidate_idx = idx
+
+                    # Test uniqueness without parentheses first
+                    insert_str_no_paren = f'{zotero_hash}_{candidate_idx}'
+                    while insert_str_no_paren in l_QA_hash:
+                        candidate_idx += 1
+                        insert_str_no_paren = f'{zotero_hash}_{candidate_idx}'
+
+                    # After uniqueness found without parentheses, add parentheses
+                    insert_str = f'({insert_str_no_paren})\n'
                 else:
                     insert_str = f'({zotero_hash})\n'
+
                 modified_content = re.sub(
                     rf'({escaped_match})',
                     rf'\1{insert_str}',
