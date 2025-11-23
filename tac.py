@@ -67,46 +67,48 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
         lo_QA_deck = get_l_s_QA_deck(content, rgx_QA_DECK, fixed_QA_prefix)
 
         metadata = post.metadata
-        qa_hash = None
+        QA_hash = None
         if 'san' in metadata and isinstance(metadata['san'], dict):
             candidate = metadata['san'].get('zotero_hash')
             if candidate and rgx_QA_hash.fullmatch(candidate):
-                qa_hash = candidate
+                QA_hash = candidate
 
-        if not qa_hash:
-            qa_hash = generate_random_hash()
+        if not QA_hash:
+            QA_hash = generate_random_hash()
             if 'san' not in metadata or not isinstance(metadata['san'], dict):
                 metadata['san'] = {}
-            metadata['san']['zotero_hash'] = qa_hash
+            metadata['san']['zotero_hash'] = QA_hash
             post.metadata = metadata
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(frontmatter.dumps(post))
 
         raw_matches = rgx_QA_pattern.findall(content)
         if raw_matches and isinstance(raw_matches[0], tuple):
-            target_matches = [''.join(m) for m in raw_matches]
+            l_s_qa = [''.join(m) for m in raw_matches]
         else:
-            target_matches = raw_matches
+            l_s_qa = raw_matches
 
         modified_content = content
-        multiple_matches = len(target_matches) > 1
+        multiple_matches = len(l_s_qa) > 1
 
-        l_QA_hash = rgx_QA_hash.findall(content)
+        lo_all_QA_hashes = rgx_QA_hash.findall(content)
+        lo_qa_hash = []
 
-        for idx, match in enumerate(target_matches, start=1):
+        for idx, match in enumerate(l_s_qa, start=1):
+            QA_hash_idx = ''
             if not rgx_QA_hash.search(match):
                 escaped_match = re.escape(match)
 
                 if multiple_matches:
                     candidate_idx = idx
-                    insert_str_no_paren = f'{qa_hash}_{candidate_idx}'
-                    while insert_str_no_paren in l_QA_hash:
+                    QA_hash_idx = f'{QA_hash}_{candidate_idx}'
+                    while QA_hash_idx in lo_all_QA_hashes:
                         candidate_idx += 1
-                        insert_str_no_paren = f'{qa_hash}_{candidate_idx}'
+                        QA_hash_idx = f'{QA_hash}_{candidate_idx}'
 
-                    insert_str = f'({insert_str_no_paren})\n'
+                    insert_str = f'({QA_hash_idx})\n'
                 else:
-                    insert_str = f'({qa_hash})\n'
+                    insert_str = f'({QA_hash})\n'
 
                 modified_content = re.sub(
                     rf'({escaped_match})',
@@ -114,7 +116,12 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
                     modified_content,
                     count=1
                 )
-                target_matches[idx-1] = match + insert_str
+                l_s_qa[idx-1]     = l_s_qa[idx-1] + '\n' + insert_str
+                # QA_hash = QA_hash_idx
+                if QA_hash_idx:
+                    lo_qa_hash.append(QA_hash_idx)
+                else:
+                    lo_qa_hash.append(QA_hash)
 
         orig_dir = os.path.dirname(file_path)
         base_name = os.path.basename(file_path)
@@ -131,7 +138,7 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
         if split_index == -1:
             frontmatter_header = fm_text
         else:
-            frontmatter_header = fm_text[:split_index+3]
+            frontmatter_header = fm_text[:split_index + 3]
 
         full_new_content = frontmatter_header + '\n' + modified_content
 
@@ -147,14 +154,18 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
                 f_new.write(full_new_content)
             print(f"File written: {new_file_path}")
 
-        qa_entry = {
-            'path': file_path,
-            'target': target_matches if target_matches else None,
-            'qa_hash': qa_hash,
-            'QA': qa_match.group(0) if (qa_match := rgx_QA_pattern.search(content)) else None,
-            'lo_QA_deck': lo_QA_deck,
-        }
-        lo_qa_entry.append(qa_entry)
+        # for s_QA in l_s_qa:
+        for idx, s_QA in enumerate(l_s_qa):
+            qa_hash = lo_qa_hash[idx]
+            for QA_deck in lo_QA_deck:
+                qa_entry = {
+                    'path': file_path,
+                    's_QA': s_QA,
+                    'QA_hash': qa_hash,
+                    'QA_deck': QA_deck,
+                }
+                lo_qa_entry.append(qa_entry)
+
     return lo_qa_entry
 
 def get_lo_qa_card(p_QA):
@@ -190,11 +201,13 @@ def get_lo_qa_card(p_QA):
 
         lo_s_qa = [m.group(0) for m in chunk_pattern.finditer(content)]
 
-        lo_qa_card.append({
-            'QA_deck': s_deck,
-            'file_path': p_fn_qa,
-            'chunks': lo_s_qa,
-        })
+        for s_QA in lo_s_qa:
+            if '#flashcard' in s_QA:
+                lo_qa_card.append({
+                    'QA_deck': s_deck,
+                    'file_path': p_fn_qa,
+                    's_QA': s_QA,
+                })
 
     return lo_qa_card
 
