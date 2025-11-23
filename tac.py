@@ -23,8 +23,10 @@ def load_config(ini_path):
 
     return p_root, ext, p_QA, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK
 
+
 def generate_random_hash(length=8):
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+
 
 def find_files_with_extension(root, extension):
     matches = []
@@ -34,10 +36,12 @@ def find_files_with_extension(root, extension):
                 matches.append(os.path.normpath(os.path.join(current_dir, fname)))
     return matches
 
+
 def get_l_s_QA_deck(content, rgx_QA_DECK, fixed_QA_prefix):
     deck_matches = rgx_QA_DECK.findall(content)
     lo_QA_deck = [m[len(fixed_QA_prefix):] if m.startswith(fixed_QA_prefix) else m for m in deck_matches]
     return lo_QA_deck
+
 
 def files_are_identical(path1, content2):
     if not os.path.isfile(path1):
@@ -45,6 +49,7 @@ def files_are_identical(path1, content2):
     with open(path1, 'r', encoding='utf-8') as f1:
         content1 = f1.read()
     return content1 == content2
+
 
 def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK):
     lo_qa_entry = []
@@ -92,7 +97,7 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
         multiple_matches = len(l_s_qa) > 1
 
         lo_all_QA_hashes = rgx_QA_hash.findall(content)
-        lo_qa_hash = [QA_hash] * len(l_s_qa)  # initialize list with current QA_hash
+        lo_qa_hash = [QA_hash] * len(l_s_qa)
 
         for idx, match in enumerate(l_s_qa, start=1):
             QA_hash_idx = ''
@@ -119,9 +124,6 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
                     count=1
                 )
                 l_s_qa[idx-1] = l_s_qa[idx-1] + '\n' + insert_str
-                # Removed lines:
-                # if QA_hash_idx:
-                #     QA_hash = QA_hash_idx
                 lo_qa_hash[idx-1] = QA_hash
 
         orig_dir = os.path.dirname(file_path)
@@ -160,14 +162,15 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
                 match = re.search(rgx_QA_hash, s_QA)
                 QA_hash = match.group(0) if match else ''
                 qa_entry = {
-                    'path': file_path,
+                    'QA_deck': QA_deck,
                     's_QA': s_QA,
                     'QA_hash': QA_hash,
-                    'QA_deck': QA_deck,
+                    'path': file_path,
                 }
                 lo_qa_entry.append(qa_entry)
 
     return lo_qa_entry
+
 
 def get_lo_qa_card(p_QA):
     prefix = 'TARGET DECK: '
@@ -206,11 +209,12 @@ def get_lo_qa_card(p_QA):
             if '#flashcard' in s_QA:
                 lo_qa_card.append({
                     'QA_deck': s_deck,
-                    'file_path': p_fn_qa,
                     's_QA': s_QA,
+                    'file_path': p_fn_qa,
                 })
 
     return lo_qa_card
+
 
 def main():
     ini_path = 'tac.ini'
@@ -226,6 +230,7 @@ def main():
 
     for qa_card in lo_qa_card:
         print(qa_card)
+
 
 if __name__ == "__main__":
     main()
