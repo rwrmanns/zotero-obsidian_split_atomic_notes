@@ -3,6 +3,7 @@ import re
 import io
 import configparser
 import frontmatter
+import hashlib
 import pprint
 import random
 import string
@@ -14,7 +15,18 @@ fn_prefix = '_NEW_'
 
 rgx_html_comment = re.compile(r'<!--.*?-->', re.DOTALL)
 
+rgx_QA_exclude = ''
+rgx_QA_pattern = ''
+rgx_QA_hash    = ''
+rgx_QA_DECK    = ''
+
+
 def load_config(ini_path):
+    global rgx_QA_exclude
+    global rgx_QA_pattern
+    global rgx_QA_hash
+    global rgx_QA_DECK
+
     config = configparser.ConfigParser()
     config.read(ini_path)
 
@@ -27,11 +39,28 @@ def load_config(ini_path):
     rgx_QA_hash = re.compile(config['DEFAULT']['rgx_QA_hash'])
     rgx_QA_DECK = re.compile(config['DEFAULT']['rgx_QA_DECK'], re.MULTILINE | re.DOTALL)
 
-    return p_root, ext, p_QA, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK
+    return p_root, ext, p_QA
 
 
 def generate_random_hash(length=8):
     return ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789', k=length))
+
+
+def get_8_digit_hash(text):
+    # Encode the text to bytes, a requirement for hashlib functions
+    encoded_text = text.encode('utf-8')
+
+    # Use SHA-256 for a robust initial hash
+    full_hash = hashlib.sha256(encoded_text).hexdigest()
+
+    # Convert the hexadecimal hash string to an integer
+    hash_int = int(full_hash, 16)
+
+    # Use the modulo operator (%) to keep only the last 8 digits
+    # 10**8 is 100,000,000
+    eight_digit_hash = hash_int % (10 ** 8)
+
+    return eight_digit_hash
 
 
 def find_files_with_extension(root, extension):
@@ -91,26 +120,47 @@ def get_lo_all_QA_hashes(content: str, rgx_QA_hash) -> list:
     return lo_all_QA_hashes
 
 
+def get_tu_Q_A_part(qa_string):
+    match = rgx_QA_pattern.search(qa_string)
+
+    if match:
+        # Group 1 is the first part (Q:...)
+        Q_part = match.group(1).strip()
+        # Group 2 is the second part (A:...)
+        A_part = match.group(2).strip()
+
+        print(f"First part (Question):\n{question_part}\n")
+        print(f"Second part (Answer):\n{answer_part}\n")
+        return (Q_part, A_part)
+    else:
+        print("No Q&A pattern match found.")
+        return ('', '')
+
+
 def get_lo_s_QA(content: str, rgx_QA_pattern) -> list[str]:
     if flashcard_sys == 'anki':
-        raw_qa_matches = rgx_QA_pattern.findall(content)
-        if raw_qa_matches and isinstance(raw_qa_matches[0], tuple):
-            lo_s_qa = [''.join(m) for m in raw_qa_matches]
+        l_qa_match = rgx_QA_pattern.findall(content)
+        if l_qa_match and isinstance(l_qa_match[0], tuple):
+            lo_s_qa = [''.join(m) for m in l_qa_match]
         else:
-            lo_s_qa = raw_qa_matches
+            lo_s_qa = l_qa_match
         return lo_s_qa
     elif flashcard_sys == 'flashcards':
-        raw_qa_matches = rgx_QA_pattern.findall(content)
-        if raw_qa_matches and isinstance(raw_qa_matches[0], tuple):
-            lo_s_qa = [''.join(m) for m in raw_qa_matches]
+        l_qa_match = rgx_QA_pattern.findall(content)
+        # get_tu_Q_A_part(qa_string)
+        lo_s_qa = []
+        if l_qa_match and isinstance(l_qa_match[0], tuple):
+            # lo_s_qa = [''.join(m) for m in l_qa_match]
+            for qa_match in l_qa_match:
+                lo_s_qa.append(qa_match)
         else:
-            lo_s_qa = raw_qa_matches
+            lo_s_qa = l_qa_match
         return lo_s_qa
     else:
         exit('get_lo_all_QA_hashes(): flashcard_sys?')
 
 
-def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK):
+def get_lo_qa_entry(file_paths):
     # return list of all QA-entries in note: qa_entry.QA, possibly qa_entry.QA_hash, qa_entry.QA_deck
     lo_qa_entry = []
     # Get frontmatter of note
@@ -150,27 +200,29 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
         # QA-text_blocks possibly have already QA_hash -> make list of them
         lo_all_QA_hashes = get_lo_all_QA_hashes(content, rgx_QA_hash)
 
-        # ?
+        # ???
         lo_qa_hash = [''] * len(lo_s_qa)
 
         # For every QA-text_block
-        for idx, match in enumerate(lo_s_qa, start=1):
+        for idx, s_qa in enumerate(lo_s_qa):
+            s_qa_block = ''.join(s_qa)
+            s_qa_8_digit_hash = get_8_digit_hash(s_qa_block)
             QA_hash_idx = ''
-            if not rgx_QA_hash.search(match):
-                escaped_match = re.escape(match)
+            if not rgx_QA_hash.search(s_qa_block):
+                escaped_match = re.escape(s_qa_block)
                 if not escaped_match.endswith('\n'):
                     escaped_match += '\n'
 
                 if multiple_matches:
                     candidate_idx = idx
-                    QA_hash_idx = f'{QA_hash}_{candidate_idx}'
+                    QA_hash_idx = f'{QA_hash}_{candidate_idx:03d}'
                     while QA_hash_idx in lo_all_QA_hashes:
                         candidate_idx += 1
-                        QA_hash_idx = f'{QA_hash}_{candidate_idx}'
+                        QA_hash_idx = f'{QA_hash}_{candidate_idx:03d}_{s_qa_8_digit_hash}'
 
-                    insert_str = f'<!--({QA_hash_idx})-->\n'
+                    insert_str = f'({QA_hash_idx}_{s_qa_8_digit_hash})\n'
                 else:
-                    insert_str = f'<!--({QA_hash})-->\n'
+                    insert_str = f'({QA_hash}_{s_qa_8_digit_hash})\n'
 
                 modified_content = re.sub(
                     rf'({escaped_match})',
@@ -178,7 +230,10 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
                     modified_content,
                     count=1
                 )
-                lo_s_qa[idx-1] = lo_s_qa[idx-1] + '\n' + insert_str
+                # modify A: attaching index (oder hash von text?)
+                # lo_s_qa[idx][0] = lo_s_qa[idx][0] + '\n' + insert_str
+                s_qa_new = (lo_s_qa[idx][0], lo_s_qa[idx][1] + '\n' + insert_str)
+                lo_s_qa[idx] = s_qa_new
                 lo_qa_hash[idx-1] = QA_hash
 
         orig_dir = os.path.dirname(file_path)
@@ -214,8 +269,8 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
 
         for s_QA in lo_s_qa:
             for QA_deck in lo_QA_deck:
-                match = re.search(rgx_QA_hash, s_QA)
-                QA_hash = match.group(0) if match else ''
+                s_qa = re.search(rgx_QA_hash, s_QA[1])
+                QA_hash = s_qa.group(0) if s_qa else ''
                 qa_entry = {
                     'QA_deck': QA_deck,
                     'QA_hash': QA_hash,
@@ -309,10 +364,10 @@ def merge_QA_items(lo_qa_entry, lo_qa_card):
 
 def main():
     ini_path = 'tac.ini'
-    p_root, ext, p_QA, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK = load_config(ini_path)
+    p_root, ext, p_QA = load_config(ini_path)
 
     all_files = find_files_with_extension(p_root, ext)
-    lo_qa_entry = get_lo_qa_entry(all_files, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK)
+    lo_qa_entry = get_lo_qa_entry(all_files)
 
     lo_qa_card = get_lo_qa_card(rgx_QA_hash, p_QA)
 
