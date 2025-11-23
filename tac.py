@@ -3,10 +3,16 @@ import re
 import io
 import configparser
 import frontmatter
+import pprint
 import random
 import string
 
+flashcard_sys = 'anki'
+flashcard_sys = 'flashcards'
+
 fn_prefix = '_NEW_'
+
+rgx_html_comment = re.compile(r'<!--.*?-->', re.DOTALL)
 
 def load_config(ini_path):
     config = configparser.ConfigParser()
@@ -24,8 +30,8 @@ def load_config(ini_path):
     return p_root, ext, p_QA, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK
 
 
-def generate_random_hash(length=32):
-    return ''.join(random.choices('0123456789abcdef', k=length))
+def generate_random_hash(length=8):
+    return ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789', k=length))
 
 
 def find_files_with_extension(root, extension):
@@ -40,6 +46,8 @@ def find_files_with_extension(root, extension):
 def get_l_s_QA_deck(content, rgx_QA_DECK, fixed_QA_prefix):
     deck_matches = rgx_QA_DECK.findall(content)
     lo_QA_deck = [m[len(fixed_QA_prefix):] if m.startswith(fixed_QA_prefix) else m for m in deck_matches]
+    if len(lo_QA_deck) == 0:
+        lo_QA_deck = ['Default']
     return lo_QA_deck
 
 
@@ -50,10 +58,64 @@ def files_are_identical(path1, content2):
         content1 = f1.read()
     return content1 == content2
 
+def get_QA_hash_from_frontmatter(file_path, metadata: dict[str, object], post, rgx_QA_hash) -> str:
+    QA_hash = None
+    if 'san' in metadata and isinstance(metadata['san'], dict):
+        candidate = metadata['san'].get('zotero_hash')
+        if candidate and rgx_QA_hash.fullmatch(candidate):
+            QA_hash = candidate
+
+    if not QA_hash:
+        # fake: ['san']['zotero_hash']
+        QA_hash = generate_random_hash()
+        if 'san' not in metadata or not isinstance(metadata['san'], dict):
+            metadata['san'] = {}
+        metadata['san']['zotero_hash'] = QA_hash
+        post.metadata = metadata
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(frontmatter.dumps(post))
+    return QA_hash
+
+def get_lo_all_QA_hashes(content: str, rgx_QA_hash) -> list:
+    if flashcard_sys == 'anki':
+        lo_all_QA_hashes = rgx_QA_hash.findall(content)
+    elif flashcard_sys == 'flashcards':
+        # In
+        lo_html_comment  = rgx_html_comment.findall(content)
+        lo_all_QA_hashes = []
+        for html_comment in lo_html_comment:
+            if rgx_QA_hash.findall(html_comment):
+                lo_all_QA_hashes += rgx_QA_hash.findall(html_comment)
+    else:
+        exit('get_lo_all_QA_hashes(): flashcard_sys?')
+    return lo_all_QA_hashes
+
+
+def get_lo_s_QA(content: str, rgx_QA_pattern) -> list[str]:
+    if flashcard_sys == 'anki':
+        raw_qa_matches = rgx_QA_pattern.findall(content)
+        if raw_qa_matches and isinstance(raw_qa_matches[0], tuple):
+            lo_s_qa = [''.join(m) for m in raw_qa_matches]
+        else:
+            lo_s_qa = raw_qa_matches
+        return lo_s_qa
+    elif flashcard_sys == 'flashcards':
+        raw_qa_matches = rgx_QA_pattern.findall(content)
+        if raw_qa_matches and isinstance(raw_qa_matches[0], tuple):
+            lo_s_qa = [''.join(m) for m in raw_qa_matches]
+        else:
+            lo_s_qa = raw_qa_matches
+        return lo_s_qa
+    else:
+        exit('get_lo_all_QA_hashes(): flashcard_sys?')
+
 
 def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx_QA_DECK):
+    # return list of all QA-entries in note: qa_entry.QA, possibly qa_entry.QA_hash, qa_entry.QA_deck
     lo_qa_entry = []
+    # Get frontmatter of note
     for file_path in file_paths:
+        fn = os.path.basename(file_path)
         try:
             post = frontmatter.load(file_path)
             content_io = io.StringIO(post.content)
@@ -62,44 +124,37 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
             print(f"Warning: Could not load frontmatter from {file_path}: {e}")
             continue
 
+        # for example: #ToDo_QA
         if rgx_QA_exclude.search(content):
             continue
 
+        # Pattern of QA
         if not rgx_QA_pattern.search(content):
             continue
 
+        # Anki: Deck
         fixed_QA_prefix = "#QA_DECK_"
         lo_QA_deck = get_l_s_QA_deck(content, rgx_QA_DECK, fixed_QA_prefix)
 
+        # Get from frontmatter: QA_hash
         metadata = post.metadata
-        QA_hash = None
-        if 'san' in metadata and isinstance(metadata['san'], dict):
-            candidate = metadata['san'].get('zotero_hash')
-            if candidate and rgx_QA_hash.fullmatch(candidate):
-                QA_hash = candidate
+        QA_hash = get_QA_hash_from_frontmatter(file_path, metadata, post, rgx_QA_hash)
 
-        if not QA_hash:
-            QA_hash = generate_random_hash()
-            if 'san' not in metadata or not isinstance(metadata['san'], dict):
-                metadata['san'] = {}
-            metadata['san']['zotero_hash'] = QA_hash
-            post.metadata = metadata
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(frontmatter.dumps(post))
+        # Get QA-text_blocks in note - maybe multiple QA's, hence list.
+        lo_s_qa = get_lo_s_QA(content, rgx_QA_pattern)
 
-        raw_matches = rgx_QA_pattern.findall(content)
-        if raw_matches and isinstance(raw_matches[0], tuple):
-            l_s_qa = [''.join(m) for m in raw_matches]
-        else:
-            l_s_qa = raw_matches
-
+        # note may possibly be modified (by inserting QA_hash to QA)
         modified_content = content
-        multiple_matches = len(l_s_qa) > 1
+        multiple_matches = len(lo_s_qa) > 1
 
-        lo_all_QA_hashes = rgx_QA_hash.findall(content)
-        lo_qa_hash = [QA_hash] * len(l_s_qa)
+        # QA-text_blocks possibly have already QA_hash -> make list of them
+        lo_all_QA_hashes = get_lo_all_QA_hashes(content, rgx_QA_hash)
 
-        for idx, match in enumerate(l_s_qa, start=1):
+        # ?
+        lo_qa_hash = [''] * len(lo_s_qa)
+
+        # For every QA-text_block
+        for idx, match in enumerate(lo_s_qa, start=1):
             QA_hash_idx = ''
             if not rgx_QA_hash.search(match):
                 escaped_match = re.escape(match)
@@ -113,9 +168,9 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
                         candidate_idx += 1
                         QA_hash_idx = f'{QA_hash}_{candidate_idx}'
 
-                    insert_str = f'({QA_hash_idx})\n'
+                    insert_str = f'<!--({QA_hash_idx})-->\n'
                 else:
-                    insert_str = f'({QA_hash})\n'
+                    insert_str = f'<!--({QA_hash})-->\n'
 
                 modified_content = re.sub(
                     rf'({escaped_match})',
@@ -123,7 +178,7 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
                     modified_content,
                     count=1
                 )
-                l_s_qa[idx-1] = l_s_qa[idx-1] + '\n' + insert_str
+                lo_s_qa[idx-1] = lo_s_qa[idx-1] + '\n' + insert_str
                 lo_qa_hash[idx-1] = QA_hash
 
         orig_dir = os.path.dirname(file_path)
@@ -157,19 +212,21 @@ def get_lo_qa_entry(file_paths, rgx_QA_exclude, rgx_QA_pattern, rgx_QA_hash, rgx
                 f_new.write(full_new_content)
             print(f"File written: {new_file_path}")
 
-        for s_QA in l_s_qa:
+        for s_QA in lo_s_qa:
             for QA_deck in lo_QA_deck:
                 match = re.search(rgx_QA_hash, s_QA)
                 QA_hash = match.group(0) if match else ''
                 qa_entry = {
                     'QA_deck': QA_deck,
-                    's_QA': s_QA,
                     'QA_hash': QA_hash,
-                    'path': file_path,
+                    's_QA': s_QA,
+                    # 'path': file_path,
+                    'path': fn,
                 }
                 lo_qa_entry.append(qa_entry)
 
     return lo_qa_entry
+
 
 
 def get_lo_qa_card(rgx_QA_hash, p_QA):
@@ -211,12 +268,43 @@ def get_lo_qa_card(rgx_QA_hash, p_QA):
                 QA_hash = match.group(0) if match else ''
                 lo_qa_card.append({
                     'QA_deck': s_deck,
-                    's_QA': s_QA,
                     'QA_hash': QA_hash,
+                    's_QA': s_QA,
                     'file_path': p_fn_qa,
                 })
 
     return lo_qa_card
+
+def merge_QA_items(lo_qa_entry, lo_qa_card):
+    # Set of all QA_deck from lo_qa_card
+    so_qa_card_QA_deck = set(qa_card['QA_deck'] for qa_card in lo_qa_card)
+    print("so_qa_card_QA_deck:")
+    pprint.pprint(so_qa_card_QA_deck)
+
+    # Set of all [QA_deck, QA_hash] pairs where QA_hash is not ''
+    so_qa_card_QA_hash = set(
+        (qa_card['QA_deck'], qa_card['QA_hash'])
+        for qa_card in lo_qa_card if qa_card['QA_hash'] != ''
+    )
+    print("so_qa_card_QA_hash:")
+    pprint.pprint(so_qa_card_QA_hash)
+
+    lo_new_qa_card = []
+
+    for qa_entry in lo_qa_entry:
+        qa_pair = (qa_entry['QA_deck'], qa_entry['QA_hash'])
+        if qa_pair not in so_qa_card_QA_hash:
+            new_qa_card = {
+                'QA_deck': qa_entry['QA_deck'],
+                's_QA': qa_entry['s_QA'],
+                'QA_hash': qa_entry['QA_hash']
+            }
+            lo_new_qa_card.append(new_qa_card)
+
+    # print("\nlo_new_qa_card:")
+    # pprint.pprint(lo_new_qa_card)
+    return lo_new_qa_card
+
 
 
 def main():
@@ -230,9 +318,11 @@ def main():
 
     for entry in lo_qa_entry:
         print(entry)
+    #
+    # for qa_card in lo_qa_card:
+    #     print(qa_card)
 
-    for qa_card in lo_qa_card:
-        print(qa_card)
+    lo_qa_card_updated = merge_QA_items(lo_qa_entry, lo_qa_card)
 
 
 if __name__ == "__main__":
