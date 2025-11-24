@@ -68,9 +68,12 @@ def get_d8_hash(text):
         # Convert the hexadecimal hash string to an integer
         hash_int = int(full_hash, 16)
 
-        # Use the modulo operator (%) to keep only the last 8 digits
-        # 10**8 is 100,000,000
-        d8_hash = hash_int % (10 ** 8)
+        # Perplexity: !
+        #   Use the modulo operator (%) to keep only the last 8 digits
+        #   10**8 is 100,000,000
+        #   d8_hash = hash_int % (10 ** 8)
+
+        d8_hash = str(hash_int)[-8:]
 
         return d8_hash
 
@@ -218,6 +221,7 @@ def get_lo_qa_entry(file_paths):
         # For every QA-text_block
         for idx, s_qa in enumerate(lo_s_qa):
             s_qa_block = ''.join(s_qa)
+            s_qa_d8_hash = get_d8_hash(s_qa_block)
             s_qa_d8_hash = get_d8_hash(s_qa_block)
             if not rgx_d8_hash.search(s_qa_block):
                 escaped_match = re.escape(s_qa_block)
