@@ -2,11 +2,11 @@ import os
 import re
 import io
 import configparser
+import difflib
 import frontmatter
 import hashlib
 import pprint
 import random
-import string
 
 flashcard_sys = 'anki'
 flashcard_sys = 'flashcards'
@@ -95,10 +95,10 @@ def get_l_s_QA_deck(content, rgx_QA_DECK, fixed_QA_prefix):
     return lo_QA_deck
 
 
-def files_are_identical(path1, content2):
-    if not os.path.isfile(path1):
+def files_are_identical(new_file_path, content2):
+    if not os.path.isfile(new_file_path):
         return False
-    with open(path1, 'r', encoding='utf-8') as f1:
+    with open(new_file_path, 'r', encoding='utf-8') as f1:
         content1 = f1.read()
     return content1 == content2
 
@@ -271,7 +271,15 @@ def get_lo_qa_entry(file_paths):
         full_new_content = frontmatter_header + '\n' + modified_content
 
         if os.path.exists(new_file_path):
-            if files_are_identical(new_file_path, full_new_content):
+            if not os.path.isfile(new_file_path):
+                return False
+            with open(new_file_path, 'r', encoding='utf-8') as new_f:
+                new_content = new_f.read()
+
+            differ  = difflib.Differ()
+            delta_x = list(differ.compare(new_content, full_new_content))
+            delta   = "".join(delta_x)
+            if not delta:
                 print(f"File identical, skipping overwrite: {new_file_path}")
             else:
                 with open(new_file_path, 'w', encoding='utf-8') as f_new:
