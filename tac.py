@@ -48,19 +48,52 @@ def generate_random_hash(length=8):
     return ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789', k=length))
 
 
-def get_d8_hash(text):
-    # re.search(rgx_QA_hash, s_QA[1])
-    # res = rgx_d8_hash.search(text)
-    if re.search(rgx_d8_hash, text):
-        d8_hash = rgx_d8_hash.search(text)
+def calc_d8_hash(s_qa_block) -> str:
+    # calc sha256-hash of >s_qa_block< & return last 8 chars of hash.
+    # - escape special chars
+    s_qa_block = re.escape(s_qa_block)
+    # - eliminate consecutive whitespaces >s_qa_block<
+    s_qa_block = re.sub(r'\s+', ' ', s_qa_block)
+    # - encode UTF-8
+    s_qa_block = s_qa_block.encode('utf-8')
+    # - encode UTF-8
+    hash_int = int(hashlib.sha256(s_qa_block).hexdigest(), 16)
+    # - Convert the hexadecimal to an integer hash string
+    d8_hash_calc = str(hash_int)[-8:]
+
+    # or kick it like Perplexity: !
+    #   Use the modulo operator (%) to keep only the last 8 digits
+    #   10**8 is 100,000,000
+    #   d8_hash = hash_int % (10 ** 8)
+    return d8_hash_calc
+
+
+def get_d8_hash_vs_0(s_qa_block):
+    # Get 8 digits of hash of 's_qa_block'
+    # 's_qa_block' == textblock one containing Q: and A: text.
+    # 'search in 's_qa_block' string like: '(Y2BBMT5N_000_51275410)'
+
+    QA_hash_long = rgx_QA_hash.search(s_qa_block)
+    if QA_hash_long:
+        # group_all    = QA_hash_long.group(0)
+        # group_1      = QA_hash_long.group(1)
+        # group_2      = QA_hash_long.group(2)
+        # group_3      = QA_hash_long.group(3)
+
+        d8_hash_org  = QA_hash_long.group(3)
+
+        return calc_d8_hash(s_qa_block)
+
+    if re.search(rgx_d8_hash, s_qa_block):
+        d8_hash = rgx_d8_hash.search(s_qa_block)
         return d8_hash.group(0)
     else:
         # # remove existing QA_hash
         # replacement = r'\1\2'
         # result_string = full_pattern.sub(replacement, input_string)
 
-        # Encode the text to bytes, a requirement for hashlib functions
-        encoded_text = text.encode('utf-8')
+        # Encode the s_qa_block to bytes, a requirement for hashlib functions
+        encoded_text = s_qa_block.encode('utf-8')
 
         # Use SHA-256 for a robust initial hash
         full_hash = hashlib.sha256(encoded_text).hexdigest()
@@ -76,6 +109,7 @@ def get_d8_hash(text):
         d8_hash = str(hash_int)[-8:]
 
         return d8_hash
+
 
 
 def find_files_with_extension(root, extension):
@@ -174,6 +208,12 @@ def get_lo_s_QA(content: str, rgx_QA_pattern) -> list[str]:
     else:
         exit('get_lo_all_QA_hashes(): flashcard_sys?')
 
+def get_normalized_s_qa_block(s_qa: str) -> str:
+    s_qa_block = ''.join(s_qa)
+    if not s_qa_block.endswith('\n'):
+        s_qa_block += '\n'
+    s_qa_block = re.escape(s_qa_block)
+    return s_qa_block
 
 def get_lo_qa_entry(file_paths):
     # return list of all QA-entries in note: qa_entry.QA, possibly qa_entry.QA_hash, qa_entry.QA_deck
@@ -216,17 +256,15 @@ def get_lo_qa_entry(file_paths):
         lo_all_QA_hashes = get_lo_all_QA_hashes(content, rgx_QA_hash)
 
         # ???
-        lo_qa_hash = [''] * len(lo_s_qa)
+        # lo_qa_hash = [''] * len(lo_s_qa)
 
         # For every QA-text_block
         for idx, s_qa in enumerate(lo_s_qa):
-            s_qa_block = ''.join(s_qa)
-            s_qa_d8_hash = get_d8_hash(s_qa_block)
-            s_qa_d8_hash = get_d8_hash(s_qa_block)
-            if not rgx_d8_hash.search(s_qa_block):
-                escaped_match = re.escape(s_qa_block)
-                if not escaped_match.endswith('\n'):
-                    escaped_match += '\n'
+            s_qa_block = get_normalized_s_qa_block(s_qa)
+            s_qa_d8_hash_calc = calc_d8_hash(s_qa_block)
+            s_qa_d8_hash = rgx_d8_hash.search(s_qa_block)
+            if not s_qa_d8_hash or (s_qa_d8_hash != s_qa_d8_hash_calc):
+                s_qa_d8_hash = s_qa_d8_hash_calc
 
                 if multiple_matches:
                     candidate_idx = idx
@@ -240,16 +278,16 @@ def get_lo_qa_entry(file_paths):
                     insert_str = f'({QA_hash}_{s_qa_d8_hash})\n'
 
                 modified_content = re.sub(
-                    rf'({escaped_match})',
+                    rf'({s_qa_block})',
                     rf'\1{insert_str}',
                     modified_content,
                     count=1
                 )
-                # modify A: attaching index (oder hash von text?)
+                # modify A: attaching index (oder hash von s_qa_block?)
                 # lo_s_qa[idx][0] = lo_s_qa[idx][0] + '\n' + insert_str
                 s_qa_new = (lo_s_qa[idx][0], lo_s_qa[idx][1] + '\n' + insert_str)
                 lo_s_qa[idx] = s_qa_new
-                lo_qa_hash[idx-1] = QA_hash
+                # lo_qa_hash[idx-1] = QA_hash
 
         orig_dir = os.path.dirname(file_path)
         base_name = os.path.basename(file_path)
@@ -277,14 +315,16 @@ def get_lo_qa_entry(file_paths):
                 new_content = new_f.read()
 
             differ  = difflib.Differ()
-            delta_x = list(differ.compare(new_content, full_new_content))
-            delta   = "".join(delta_x)
-            if not delta:
+            delta_x = list(differ.compare(new_content.splitlines(), full_new_content.splitlines()))
+            delta   = "\n".join(delta_x)
+            if new_content == full_new_content:
                 print(f"File identical, skipping overwrite: {new_file_path}")
             else:
                 with open(new_file_path, 'w', encoding='utf-8') as f_new:
                     f_new.write(full_new_content)
                 print(f"File updated: {new_file_path}")
+            if new_file_path in file_paths:
+                file_paths.remove(new_file_path)
         else:
             with open(new_file_path, 'w', encoding='utf-8') as f_new:
                 f_new.write(full_new_content)
@@ -302,10 +342,7 @@ def get_lo_qa_entry(file_paths):
                     'path': fn,
                 }
                 lo_qa_entry.append(qa_entry)
-
     return lo_qa_entry
-
-
 
 def get_lo_qa_card(rgx_QA_hash, p_QA):
     prefix = 'TARGET DECK: '
