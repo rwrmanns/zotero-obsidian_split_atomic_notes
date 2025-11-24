@@ -19,13 +19,14 @@ rgx_QA_exclude = ''
 rgx_QA_pattern = ''
 rgx_QA_hash    = ''
 rgx_QA_DECK    = ''
-
+rgx_d8_hash    = ''
 
 def load_config(ini_path):
     global rgx_QA_exclude
     global rgx_QA_pattern
     global rgx_QA_hash
     global rgx_QA_DECK
+    global rgx_d8_hash
 
     config = configparser.ConfigParser()
     config.read(ini_path)
@@ -38,6 +39,7 @@ def load_config(ini_path):
     rgx_QA_pattern = re.compile(config['DEFAULT']['rgx_QA_pattern'], re.MULTILINE | re.DOTALL)
     rgx_QA_hash = re.compile(config['DEFAULT']['rgx_QA_hash'])
     rgx_QA_DECK = re.compile(config['DEFAULT']['rgx_QA_DECK'], re.MULTILINE | re.DOTALL)
+    rgx_d8_hash = re.compile(config['DEFAULT']['rgx_d8_hash'], re.MULTILINE | re.DOTALL)
 
     return p_root, ext, p_QA
 
@@ -46,21 +48,31 @@ def generate_random_hash(length=8):
     return ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789', k=length))
 
 
-def get_8_digit_hash(text):
-    # Encode the text to bytes, a requirement for hashlib functions
-    encoded_text = text.encode('utf-8')
+def get_d8_hash(text):
+    # re.search(rgx_QA_hash, s_QA[1])
+    # res = rgx_d8_hash.search(text)
+    if re.search(rgx_d8_hash, text):
+        d8_hash = rgx_d8_hash.search(text)
+        return d8_hash.group(0)
+    else:
+        # # remove existing QA_hash
+        # replacement = r'\1\2'
+        # result_string = full_pattern.sub(replacement, input_string)
 
-    # Use SHA-256 for a robust initial hash
-    full_hash = hashlib.sha256(encoded_text).hexdigest()
+        # Encode the text to bytes, a requirement for hashlib functions
+        encoded_text = text.encode('utf-8')
 
-    # Convert the hexadecimal hash string to an integer
-    hash_int = int(full_hash, 16)
+        # Use SHA-256 for a robust initial hash
+        full_hash = hashlib.sha256(encoded_text).hexdigest()
 
-    # Use the modulo operator (%) to keep only the last 8 digits
-    # 10**8 is 100,000,000
-    eight_digit_hash = hash_int % (10 ** 8)
+        # Convert the hexadecimal hash string to an integer
+        hash_int = int(full_hash, 16)
 
-    return eight_digit_hash
+        # Use the modulo operator (%) to keep only the last 8 digits
+        # 10**8 is 100,000,000
+        d8_hash = hash_int % (10 ** 8)
+
+        return d8_hash
 
 
 def find_files_with_extension(root, extension):
@@ -91,7 +103,7 @@ def get_QA_hash_from_frontmatter(file_path, metadata: dict[str, object], post, r
     QA_hash = None
     if 'san' in metadata and isinstance(metadata['san'], dict):
         candidate = metadata['san'].get('zotero_hash')
-        if candidate and rgx_QA_hash.fullmatch(candidate):
+        if candidate and rgx_QA_hash.search(candidate):
             QA_hash = candidate
 
     if not QA_hash:
@@ -188,7 +200,7 @@ def get_lo_qa_entry(file_paths):
 
         # Get from frontmatter: QA_hash
         metadata = post.metadata
-        QA_hash = get_QA_hash_from_frontmatter(file_path, metadata, post, rgx_QA_hash)
+        QA_hash =   get_QA_hash_from_frontmatter(file_path, metadata, post, rgx_QA_hash)
 
         # Get QA-text_blocks in note - maybe multiple QA's, hence list.
         lo_s_qa = get_lo_s_QA(content, rgx_QA_pattern)
@@ -206,9 +218,8 @@ def get_lo_qa_entry(file_paths):
         # For every QA-text_block
         for idx, s_qa in enumerate(lo_s_qa):
             s_qa_block = ''.join(s_qa)
-            s_qa_8_digit_hash = get_8_digit_hash(s_qa_block)
-            QA_hash_idx = ''
-            if not rgx_QA_hash.search(s_qa_block):
+            s_qa_d8_hash = get_d8_hash(s_qa_block)
+            if not rgx_d8_hash.search(s_qa_block):
                 escaped_match = re.escape(s_qa_block)
                 if not escaped_match.endswith('\n'):
                     escaped_match += '\n'
@@ -218,11 +229,11 @@ def get_lo_qa_entry(file_paths):
                     QA_hash_idx = f'{QA_hash}_{candidate_idx:03d}'
                     while QA_hash_idx in lo_all_QA_hashes:
                         candidate_idx += 1
-                        QA_hash_idx = f'{QA_hash}_{candidate_idx:03d}_{s_qa_8_digit_hash}'
+                        QA_hash_idx = f'{QA_hash}_{candidate_idx:03d}_{s_qa_d8_hash}'
 
-                    insert_str = f'({QA_hash_idx}_{s_qa_8_digit_hash})\n'
+                    insert_str = f'({QA_hash_idx}_{s_qa_d8_hash})\n'
                 else:
-                    insert_str = f'({QA_hash}_{s_qa_8_digit_hash})\n'
+                    insert_str = f'({QA_hash}_{s_qa_d8_hash})\n'
 
                 modified_content = re.sub(
                     rf'({escaped_match})',
