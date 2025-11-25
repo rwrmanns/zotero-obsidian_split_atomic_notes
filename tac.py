@@ -32,8 +32,9 @@ def load_config(ini_path):
     config.read(ini_path)
 
     p_root = config['DEFAULT']['p_root']
-    ext = config['DEFAULT']['ext']
-    p_QA = config['DEFAULT']['p_QA']
+    ext    = config['DEFAULT']['ext']
+    p_QA   = config['DEFAULT']['p_QA']
+    QA_tag = config['DEFAULT']['QA_tag']
 
     rgx_QA_exclude = re.compile(config['DEFAULT']['rgx_QA_exclude'], re.MULTILINE | re.DOTALL)
     rgx_QA_pattern = re.compile(config['DEFAULT']['rgx_QA_pattern'], re.MULTILINE | re.DOTALL)
@@ -41,7 +42,7 @@ def load_config(ini_path):
     rgx_QA_DECK = re.compile(config['DEFAULT']['rgx_QA_DECK'], re.MULTILINE | re.DOTALL)
     rgx_d8_hash = re.compile(config['DEFAULT']['rgx_d8_hash'], re.MULTILINE | re.DOTALL)
 
-    return p_root, ext, p_QA
+    return p_root, ext, p_QA, QA_tag
 
 
 def generate_random_hash(length=8):
@@ -344,25 +345,73 @@ def get_lo_qa_entry(file_paths):
                 lo_qa_entry.append(qa_entry)
     return lo_qa_entry
 
-def get_lo_qa_card(rgx_QA_hash, p_QA):
-    prefix = 'TARGET DECK: '
+
+def parse_flashcards(text):
+    lo_qa_card = []
+    # Split text on marker lines, keeping them as separate entries
+    # r"^#marker\s*(.*)$((?:\n|\r\n?)*)",
+    #     re.MULTILINE
+    # blocks = re.split(r'(^#flashcards.*$)', text, flags=re.MULTILINE)
+    blocks = re.split(r'(^#flashcards\s*(.*)$((?:\n|\r\n?)*))', text, flags=re.MULTILINE)
+
+    # blocks alternate as ['', marker line, content, marker line, content, ...]
+    if blocks[0].strip() == '':
+        blocks = blocks[1:]
+
+    # Process pairs of (marker line, content block)
+    for i in range(0, len(blocks), 2):
+        deck_line = blocks[i].strip()
+        if (i+1) >= len(blocks):
+            continue
+        content_block = blocks[i+1].split('\n\n')[0].strip()  # Trim at first empty line
+
+        # Split at one to three question marks
+        split_q_a = re.split(r'\?{1,3}', content_block, maxsplit=1)
+        if len(split_q_a) != 2:
+            continue  # Skip if can't split properly
+
+        q_part, a_part = map(str.strip, split_q_a)
+
+        # Prepend 'Q: ' or 'A: ' if missing (case insensitive)
+        if not re.match(r'^Q:\s*', q_part, re.IGNORECASE):
+            q_part = 'Q: ' + q_part
+        if not re.match(r'^A:\s*', a_part, re.IGNORECASE):
+            a_part = 'A: ' + a_part
+
+        card = {'Decks': deck_line, 'Q': q_part, 'A': a_part}
+        lo_qa_card.append(card)
+
+    return lo_qa_card
+
+
+
+def get_lo_qa_card(rgx_QA_hash, p_QA, QA_tag):
     lo_p_fn_qa = []
     lo_qa_card = []
 
     for root, _, files in os.walk(p_QA):
         for fname in files:
             if fname.endswith('.md'):
-                path_normalized = os.path.normpath(os.path.join(root, fname))
-                lo_p_fn_qa.append(path_normalized)
+                p_fn = os.path.normpath(os.path.join(root, fname))
+                with open(p_fn, 'r') as f:
+                    first_line = f.readline()
+                    if first_line.startswith(QA_tag):
+                        lo_p_fn_qa.append(p_fn)
 
-    chunk_pattern = re.compile(
-        r'((?:[^\n][\n]?)+) #flashcard ?\n*((?:\n(?:^.{1,3}$|^.{4}(?<!<!--).*))+)<' ,
-        re.MULTILINE | re.VERBOSE
-    )
-
+    pattern = r"^#flashcard.*?(?=^#flashcard|\Z)"
     for p_fn_qa in lo_p_fn_qa:
         with open(p_fn_qa, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+            text = f.read()
+
+        blocks = re.findall(pattern, text, re.DOTALL | re.MULTILINE)
+
+        print(f"\n###############\n")
+        for i, block in enumerate(blocks, 1):
+            # print(f"Block {i}:\n{block}\n------")
+            lo_qa_card = parse_flashcards(block)
+            pprint.pprint(lo_qa_card)
+
+        return
 
         if not lines:
             continue
@@ -424,20 +473,28 @@ def merge_QA_items(lo_qa_entry, lo_qa_card):
 
 def main():
     ini_path = 'tac.ini'
-    p_root, ext, p_QA = load_config(ini_path)
+    p_root, ext, p_QA, QA_tag = load_config(ini_path)
 
-    all_files = find_files_with_extension(p_root, ext)
+    all_files   = find_files_with_extension(p_root, ext)
+
+    # get list of all QA's in *.md but not in QA-files (flashcard|anki| ...)
     lo_qa_entry = get_lo_qa_entry(all_files)
 
-    lo_qa_card = get_lo_qa_card(rgx_QA_hash, p_QA)
+    # get list of all QA's in QA-files (flashcard)
+    lo_qa_card  = get_lo_qa_card(rgx_QA_hash, p_QA, QA_tag)
 
-    for entry in lo_qa_entry:
-        print(entry)
+    # all_files   = find_files_with_extension(p_root, ext)
+    # lo_qa_entry = get_lo_qa_entry(all_files)
+    #
+    # lo_qa_card  = get_lo_qa_card(rgx_QA_hash, p_QA)
+
+    # for entry in lo_qa_entry:
+    #     print(entry)
     #
     # for qa_card in lo_qa_card:
     #     print(qa_card)
 
-    lo_qa_card_updated = merge_QA_items(lo_qa_entry, lo_qa_card)
+    # lo_qa_card_updated = merge_QA_items(lo_qa_entry, lo_qa_card)
 
 
 if __name__ == "__main__":
