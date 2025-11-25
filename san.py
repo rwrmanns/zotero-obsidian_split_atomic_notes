@@ -214,7 +214,7 @@ def get_pagenumber_headertext(s_text):
 
 
 def get_text_block(text: str, pattern_begin: str, pattern_end: str) -> Optional[str]:
-    # Searches in >text< the first sequence of lines, 
+    # Searches in >text< the first sequence of lines,
     # that begins with >pattern_begin< and ends with >pattern_en<. 
     # Purge the marks >pattern_begin< and >pattern_en< from the resulting text.
     
