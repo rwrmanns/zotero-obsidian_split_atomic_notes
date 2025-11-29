@@ -214,9 +214,9 @@ def get_pagenumber_headertext(s_text):
 
 
 def get_text_block(text: str, pattern_begin: str, pattern_end: str) -> Optional[str]:
-    # Searches in >text< the first sequence of lines,
+    # Searches in >s_text< the first sequence of lines,
     # that begins with >pattern_begin< and ends with >pattern_en<. 
-    # Purge the marks >pattern_begin< and >pattern_en< from the resulting text.
+    # Purge the marks >pattern_begin< and >pattern_en< from the resulting s_text.
     
     lines = text.splitlines()
 
@@ -474,7 +474,7 @@ def do_write_atomic_note(note_source, l_p_fn_note, cnt_notes_written) -> int :
 
     # no previous version of note_(summary|annotation) found => very first writing of >s_content<
     if not Path(note_source.p_fn).is_file():
-        # put the s_content together: join frontmatter and content to s_note == text of note_fs.
+        # put the s_content together: join frontmatter and content to s_note == s_text of note_fs.
         s_note  = get_dict_to_yaml_str(note_source.d_frontmatter)
         s_note += '\n'
         s_note += note_source.s_content
@@ -766,7 +766,7 @@ def compose_and_write_atomic_note_annotation(note_source, l_summary_tags, idx, s
     s_content  += s_citation_refs + '\n'
     # s_content+= "___" + '\n'
     s_content  += s_comment + '\n'
-    s_content  += s_QA # + '\n'
+    s_content  += s_QA + '\n' + '#QA_Deck_ToDo' # + '\n'
     s_content  += s_references  + '\n'
     s_content  += "___"
 
