@@ -3,6 +3,7 @@ import re
 import io
 import configparser
 import difflib
+from os.path import basename
 from pprint import pprint
 from re import split
 
@@ -24,6 +25,7 @@ rgx_d8_hash        = None
 rgx_QA_startword   = None
 rgx_QA_block       = None
 rgx_QA_split       = None
+rgx_QA_ID          = None          # tacID: unique identifier of QA + deck
 rgx_QA_SR_hash     = None          # hash of deck + s_QA
 rgx_html_comment   = None          # Regex that matches HTML comments (including multiline)
 
@@ -36,48 +38,36 @@ def load_config(ini_path):
     global rgx_QA_startword
     global rgx_QA_block
     global rgx_QA_split
+    global rgx_QA_ID
     global rgx_QA_SR_hash
     global rgx_html_comment
 
     config = configparser.ConfigParser()
     config.read(ini_path)
 
-    p_root = config['DEFAULT']['p_root']
-    ext    = config['DEFAULT']['ext']
-    p_QA   = config['DEFAULT']['p_QA']
-    QA_tag = config['DEFAULT']['QA_tag']
+    p_root   = config['DEFAULT']['p_root']
+    ext      = config['DEFAULT']['ext']
+    p_QA     = config['DEFAULT']['p_QA']
+    QA_tag   = config['DEFAULT']['QA_tag']
 
     rgx_QA_exclude   = re.compile(config['DEFAULT']['rgx_QA_exclude'], re.MULTILINE | re.DOTALL)
     # rgx_QA_pattern   = re.compile(config['DEFAULT']['rgx_QA_pattern'], re.MULTILINE | re.DOTALL)
     # rgx_QA_SR_hash   = re.compile(config['DEFAULT']['rgx_QA_SR_hash'])
     rgx_QA_DECK      = re.compile(config['DEFAULT']['rgx_QA_DECK'], re.MULTILINE | re.DOTALL)
     rgx_d8_hash      = re.compile(config['DEFAULT']['rgx_d8_hash'], re.MULTILINE | re.DOTALL)
+    rgx_QA_ID        = re.compile(config['DEFAULT']['rgx_QA_ID'], re.MULTILINE | re.DOTALL)
     rgx_html_comment = re.compile(r'<!--.*?-->', re.DOTALL)
 
     lo_startword_raw = ['#flashcards', '#QA_DECK_']
     lo_QA_startword  = [re.escape(sw) for sw in lo_startword_raw]
     s_startword_tail = r"[A-Za-z0-9_/\-\\]{0,25}"
 
-    # ToDo get stopword from *.ini
     lo_stopword_raw = list(lo_startword_raw)
     lo_stopword_raw.append(['Quelle: '])
-    lo_QA_stopword  = [re.escape(sw) for sw in lo_startword_raw]
-    # startword REGEX
-    rgx_QA_lo_stopword            = r"(?:{})".format("|".join(re.escape(QA_stopword) for QA_stopword in lo_QA_stopword))
-
-    words = ['#flashcards', '#QA_DECK_']
-    pattern = r"(?:{})".format("|".join(re.escape(w) for w in words))
-
-    rgx = re.compile(pattern)
 
     rgx_QA_startword           = r"(?:%s)%s" % ("|".join(lo_QA_startword), s_startword_tail)
-    rgx_QA_block_begin_pattern = (r"(" + rgx_QA_startword + r"(?:\s+" + rgx_QA_startword + r")*)")
-    rgx_QA_block_begin         = re.compile(r"^" + rgx_QA_block_begin_pattern + r"$", re.MULTILINE)
-    rgx_QA_block_end           = re.compile(r"^" + rgx_QA_lo_stopword)
     rgx_html_comment           = re.compile(r"<!--.*?-->", re.DOTALL)
     rgx_QA_SR_hash             = re.compile(r"([A-Z0-9]{8})(?:_(\d{3}))?(?:_(\d{8}))?")
-
-    #################################
 
     QA_lo_start_tag = ["#QA_DECK_", "#flashard_"]
 
@@ -145,7 +135,8 @@ def get_cleaned_line(line):
     return True
 
 def get_lo_QA_deck_block(text):
-    # QA_deck_block == block of text beginning with tag indicating deck of one or more following QAs.
+    # QA_deck_block == block of text ...
+    # ... beginning with tag indicating deck of one or more following QAs.
 
     lo_QA_deck_block = []
     # matches = list(rgx_QA_block_begin.finditer(text))
@@ -153,30 +144,6 @@ def get_lo_QA_deck_block(text):
     matches = [block.group() for block in rgx_QA_block.finditer(text)]
     if not matches:
         return []
-
-    # for idx, block in enumerate(blocks, 1):
-    #     print(f"\n--- BLOCK {idx} ---")
-    #     print(block)
-    # for idx, block in enumerate(matches):
-    #     start = block.start()
-    #     end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
-    #
-    #     block_text = text[start:end]
-    #     lines = block_text.splitlines()
-    #
-    #     deck_line = lines[0]
-    #     qa_lines = lines[1:]
-    #
-    #     deck_clean = "\n".join(ln for ln in [deck_line] if get_cleaned_line(ln))
-    #     qa_clean   = "\n".join(ln for ln in qa_lines if get_cleaned_line(ln))
-    #
-    #     lo_QA_deck = re.findall(rgx_QA_startword, deck_clean)
-    #
-    #     lo_QA_deck_block.append({
-    #         "DECK": deck_clean,
-    #         "QA": qa_clean,
-    #         "lo_QA_deck": lo_QA_deck
-    #     })
 
     for idx, block_text in enumerate(matches):
 
@@ -187,11 +154,12 @@ def get_lo_QA_deck_block(text):
         lines = block_text.splitlines()
 
         deck_line = lines[0]
-        qa_lines = lines[1:]
+        qa_lines  = lines[1:]
 
         deck_clean = "\n".join(ln for ln in [deck_line] if get_cleaned_line(ln))
         qa_clean   = "\n".join(ln for ln in qa_lines if get_cleaned_line(ln))
 
+        # list of decks
         lo_QA_deck = re.findall(rgx_QA_startword, deck_clean)
 
         lo_QA_deck_block.append({
@@ -250,6 +218,26 @@ def get_QA_Q_and_A(s_QA):
 
     return QA_Q, QA_A
 
+def get_QA_ID(QA_A):
+    m = rgx_QA_ID.match(QA_A)
+    QA_ID = None
+    if m:
+        QA_ID = m.group(0)
+        # print("FULL MATCH:", m.group(0))
+        # print("prefix:", m.group("prefix"))
+        # print("z_hash:", m.group("z_hash"))
+        # print("QA_deck_hash:", m.group("QA_deck_hash"))
+
+    rgx = re.compile(
+        r'(?P<prefix>QA_ID_)'
+        r'(?P<z_hash>[A-Za-z0-9]{8})_'
+        r'(?P<QA_deck_hash>[A-Za-z0-9]{8})'
+    )
+    m = rgx.match(QA_A)
+    if m:
+        QA_ID = m.group(0)
+    return QA_ID
+
 def get_lo_d_QA_normalized(lo_do_QA, file_path, fn, QA_zotero_hash):
     # in s_QA extract and purge html comments and hashes
     lo_do_QA_normalized = []
@@ -268,23 +256,31 @@ def get_lo_d_QA_normalized(lo_do_QA, file_path, fn, QA_zotero_hash):
 
         QA_Q, QA_A = get_QA_Q_and_A(s_QA)
 
-        # Compute new deterministic hash == ID from original s_QA combining QA-text and deck.
+        # If there is no "QA_ID" at the end of QA_A
+        if 'ABJFDY5I' in s_QA:
+            pass
         s_deck_and_QA = do_QA["QA_deck"] + ' - ' + s_QA
         QA_d8_hash = get_d8_hash(s_deck_and_QA)
-
+        QA_ID = get_QA_ID(s_QA)
+        if not QA_ID:
+            # Compute new deterministic hash == ID from original s_QA combining QA-text and deck.
+            QA_ID = 'QA_ID_' + QA_zotero_hash + '_' + QA_d8_hash  # specific ID of QA + deck.
+        pass
 
         # Build normalized dict
         d_new = {
-            'path'           : file_path,
-            'fn'             : fn,
-            "QA_deck"        : do_QA["QA_deck"],
-            "QA"             : s_QA,
-            "QA_Q"           : QA_Q,
-            "QA_A"           : QA_A,
-            "QA_TimeStamp"   : QA_TimeStamp,
-            "QA_zotero_hash" : QA_zotero_hash,                        # hash of note
-            "QA_d8_hash"     : QA_d8_hash,                            # hash of specific question QA_deck included
-            "QA_ID"          : QA_zotero_hash + '_' + QA_d8_hash      # specific ID of question + deck.
+            'path'           : file_path,        # path
+            'fn'             : fn,               # filename
+            "QA_deck"        : do_QA["QA_deck"], # deck of QA
+            "QA"             : s_QA,             # complete string of QA
+            "QA_Q"           : QA_Q,             # Question
+            "QA_A"           : QA_A,             # Answer
+            "QA_TimeStamp"   : QA_TimeStamp,     # timestamp of Spaced Repetition obsidian plugin
+            "QA_zotero_hash" : QA_zotero_hash,   # hash of note (from frontmatter but where does it come from ??)
+            "QA_d8_hash"     : QA_d8_hash,       # hash of specific question QA_deck included
+            "QA_ID"          : QA_ID             # specific ID of QA + deck.
+                                                 # if >QA_d8_hash< != third part of  >QA_ID<   => >QA< ond/or deck has changed.
+
         }
         lo_do_QA_normalized.append(d_new)
 
@@ -573,6 +569,7 @@ def get_lo_qa_entry(file_paths):
     # return list of all QA-entries in note: qa_entry.QA, possibly qa_entry.QA_zotero_hash, qa_entry.QA_deck
     # >lo_do_QA_file< list of all files with QA section.
     lo_do_QA_file      = get_lo_QA_file(file_paths)
+
     lo_do_QA_entry     = []
     for do_QA_file in lo_do_QA_file:
         # QA == Question-Answer text .
@@ -584,12 +581,12 @@ def get_lo_qa_entry(file_paths):
         metadata       = post.metadata
         QA_zotero_hash = get_QA_zotero_hash_from_frontmatter(file_path, metadata, post, rgx_QA_SR_hash)
 
+        # QA_deck_block == block of text beginning with tag indicating deck of one or more QAs.
+        lo_QA_deck_block = get_lo_QA_deck_block(content)
+
         # >lo_do_QA_entry_org< == raw QA text block as is (with Timestamp, Anki-, obsidian- ID or similar ...)
         # Will be cleaned from that. --> >lo_do_QA_entry<
         lo_do_QA_entry_org = []
-
-        # QA_deck_block == block of text beginning with tag indicating deck of one or more QAs.
-        lo_QA_deck_block = get_lo_QA_deck_block(content)
         # transform multiple QA textblock in multiple dicts of QA: "QA_deck": ..., "s_QA": ...
         for QA_deck_block in lo_QA_deck_block:
             lo_do_QA_entry_org.extend(get_lo_d_QA(QA_deck_block))
@@ -598,68 +595,49 @@ def get_lo_qa_entry(file_paths):
         # Normalize and clean QA from Timestamp of Spaced Repetition and ID of tac.py and ...
         # ... add: file_path, fn, QA_zotero_hash
         lo_do_QA_entry.extend(get_lo_d_QA_normalized(lo_do_QA_entry_org, file_path, fn, QA_zotero_hash))
-
-
-        # "QA_deck": ..., "s_QA": ..., "QA_TimeStamp": ..., "QA_SR_hash": ...
-
     return lo_do_QA_entry
 
 
-def get_lo_qa_card(text):
+def get_lo_qa_card(text, file_path, fn):
     # get all entries in Spaced Repetition obsidian note.
-    lo_flashcard = []
+
+    lo_flashcard     = []
+    lo_QA_deck_block = []
+    lo_do_QA_card    = []
 
     # Split s_text into blocks by lines starting with #flashcards (keep markers)
-    block_split = re.split(r'(?=^#flashcards[^\n]*)', text, flags=re.MULTILINE)
+    lo_block_text = re.split(r'(?=^#flashcards[^\n]*)', text, flags=re.MULTILINE)
 
-    for block in block_split:
-        lines = block.strip().split('\n')
+    for block_text in lo_block_text:
+        lines = block_text.strip().splitlines()
         if not lines:
             continue
 
         # First line is the deck line (contains #flashcards and tags)
-        deck_line = lines[0].strip()
-        # Capture all deck tags as a list (split by whitespace)
-        decks = deck_line.split()
+        deck_line = lines[0]
+        qa_lines  = lines[1:]
 
-        # The rest is the block content
-        content = '\n'.join(lines[1:]).strip()
-        if not content:
-            continue
+        deck_clean = "\n".join(ln for ln in [deck_line] if get_cleaned_line(ln))
+        qa_clean   = "\n".join(ln for ln in qa_lines if get_cleaned_line(ln))
 
-        # Split block content into flashcards by blank line (or you can customize)
-        card_texts = re.split(r'\n\s*\n', content)
+        # get all deck tags
+        lo_QA_deck = re.findall(rgx_QA_startword, deck_clean)
 
-        for card_text in card_texts:
-            card_text = card_text.strip()
-            if not card_text:
-                continue
+        lo_QA_deck_block.append({
+            "DECK": deck_clean,
+            "QA": qa_clean,
+            "lo_QA_deck": lo_QA_deck
+        })
 
-            # Try single-line reversed (Q:::A)
-            m_rev = re.match(r'^(.*?):::(.*)$', card_text, flags=re.DOTALL)
-            if m_rev:
-                q = m_rev.group(1).strip()
-                a = m_rev.group(2).strip()
-                lo_flashcard.append({'Decks': decks, 'Q': q, 'A': a})
-                continue
+        # >lo_do_QA_entry_org< == raw QA text block as is (with Timestamp, Anki-, obsidian- ID or similar ...)
+        # Will be cleaned from that. --> >lo_do_QA_card<
+        lo_do_QA_entry_org = []
+        # transform multiple QA textblock in multiple dicts of QA: "QA_deck": ..., "s_QA": ...
+        for QA_deck_block in lo_QA_deck_block:
+            lo_do_QA_entry_org.extend(get_lo_d_QA(QA_deck_block))
 
-            # Try single-line (Q::A)
-            m = re.match(r'^(.*?)::(.*)$', card_text, flags=re.DOTALL)
-            if m:
-                q = m.group(1).strip()
-                a = m.group(2).strip()
-                lo_flashcard.append({'Decks': decks, 'Q': q, 'A': a})
-                continue
-
-            # Try multiline separated by a line containing only '?'
-            parts = re.split(r'^\?\s*$', card_text, flags=re.MULTILINE)
-            if len(parts) == 2:
-                q, a = parts[0].strip(), parts[1].strip()
-                lo_flashcard.append({'Decks': decks, 'Q': q, 'A': a})
-                continue
-
-            # Skip if no known format matched
-    return lo_flashcard
+    lo_do_QA_card.extend(get_lo_d_QA_normalized(lo_do_QA_entry_org, file_path, fn, QA_zotero_hash = 'flashcar'))
+    return lo_do_QA_card
 
 
 def merge_QA_items(lo_qa_entry, lo_qa_card):
@@ -707,12 +685,8 @@ def main():
     # pprint(lo_qa_entry)
     # print("Total QA entries:", len(lo_qa_entry))
 
-    # get list of all QA's in QA-files (flashcard-notes / (anki - nodes))
-    # lo_qa_card  = get_lo_qa_card(rgx_QA_SR_hash, p_QA, QA_tag)
-
+    # get list of all QA's in (flashcard- / anki-) QA-files ()
     lo_p_fn_qa = []
-    lo_qa_card = []
-
     for root, _, files in os.walk(p_QA):
         for fname in files:
             if fname.endswith('.md'):
@@ -722,25 +696,15 @@ def main():
                     if first_line.startswith(QA_tag):
                         lo_p_fn_qa.append(p_fn)
 
+    lo_qa_card = []
     for p_fn_qa in lo_p_fn_qa:
         with open(p_fn_qa, 'r', encoding='utf-8') as f:
             qa_file_text = f.read()
-            lo_qa_card  = get_lo_qa_card(qa_file_text)
+            lo_qa_card.extend(get_lo_qa_card(qa_file_text, p_fn_qa, basename(p_fn_qa)))
             pass
 
     pprint(lo_qa_card)
-
-
-    # all_files   = find_files_with_extension(p_root, ext)
-    # lo_qa_entry = get_lo_qa_entry(all_files)
-    #
-    # lo_qa_card  = get_lo_qa_card(rgx_QA_SR_hash, p_QA)
-
-    # for entry in lo_qa_entry:
-    #     print(entry)
-    #
-    # for qa_card in lo_qa_card:
-    #     print(qa_card)
+    print("Total QA entries:", len(lo_qa_card))
 
     # lo_qa_card_updated = merge_QA_items(lo_qa_entry, lo_qa_card)
 
