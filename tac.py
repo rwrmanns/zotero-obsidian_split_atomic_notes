@@ -7,11 +7,17 @@ import io
 import os
 import random
 import re
+import zoneinfo
 
+from collections import Counter
+from datetime import date
+from datetime import datetime
 from os.path import basename
 from pprint import pprint
 from re import split
 
+
+import json
 
 flashcard_sys = 'anki'
 flashcard_sys = 'flashcards'
@@ -20,17 +26,18 @@ fn_prefix = '_NEW_'
 
 rgx_html_comment = re.compile(r'<!--.*?-->', re.DOTALL)
 
-rgx_QA_exclude     = None
-rgx_QA_pattern     = None
-rgx_QA_DECK        = None
-rgx_d8_hash        = None
-rgx_QA_startword   = None
-rgx_QA_block       = None
-rgx_QA_split       = None
-rgx_QA_ID          = None          # tacID: unique identifier of QA + deck
-rgx_QA_SR_hash     = None          # hash of deck + s_QA
-rgx_html_comment   = None          # Regex that matches HTML comments (including multiline)
-
+rgx_QA_exclude       = None
+rgx_QA_pattern       = None
+rgx_QA_DECK          = None
+rgx_d8_hash          = None
+rgx_QA_startword     = None
+rgx_QA_block         = None
+rgx_QA_split         = None
+rgx_QA_ID            = None          # tacID: unique identifier of QA + deck
+rgx_QA_SR_hash       = None          # hash of deck + s_QA
+rgx_html_comment     = None          # Regex that matches HTML comments (including multiline)
+rgx_flashcard_backup = None
+rgx_norm_QA_deck     = None
 
 def load_config(ini_path):
     global rgx_QA_exclude
@@ -43,6 +50,8 @@ def load_config(ini_path):
     global rgx_QA_ID
     global rgx_QA_SR_hash
     global rgx_html_comment
+    global rgx_flashcard_backup
+    global rgx_norm_QA_deck
 
     config = configparser.ConfigParser()
     config.read(ini_path)
@@ -58,7 +67,8 @@ def load_config(ini_path):
     rgx_QA_ID        = re.compile(config['DEFAULT']['str_QA_ID'])
     rgx_html_comment = re.compile(r'<!--.*?-->', re.DOTALL)
 
-    lo_startword_raw = ['#flashcards', '#QA_DECK_']
+    QA_lo_start_tag  = ["#QA", "#flashards"]
+    lo_startword_raw = ['#flashcards', '#QA']
     lo_QA_startword  = [re.escape(sw) for sw in lo_startword_raw]
     s_startword_tail = r"[A-Za-z0-9_/\-\\]{0,25}"
     lo_stopword_raw  = list(lo_startword_raw).append(['Quelle: '])
@@ -68,10 +78,9 @@ def load_config(ini_path):
     rgx_html_comment = re.compile(r"<!--.*?-->", re.DOTALL)
     rgx_QA_SR_hash   = re.compile(r"([A-Z0-9]{8})(?:_(\d{3}))?(?:_(\d{8}))?")
 
-    QA_lo_start_tag  = ["#QA_DECK_", "#flashard_"]
 
     # Escape each tag so '#' and other characters become literal.
-    rgx_QA_lo_start_tag = "|".join(re.escape(tag) + r"[A-Za-z0-9._-]+" for tag in QA_lo_start_tag)  # tag + file-safe chars
+    rgx_QA_lo_start_tag = "|".join(re.escape(tag) + r"_[A-Za-z0-9._-]+" for tag in QA_lo_start_tag)  # tag + file-safe chars
 
     # Compile begin-regex (still matches only at the beginning of a line)
     rgx_QA_block_begin = re.compile(rf"^(?:{rgx_QA_lo_start_tag})", re.MULTILINE)
@@ -114,6 +123,23 @@ def load_config(ini_path):
         r'$',
         re.DOTALL
     )
+
+    rgx_flashcard_backup = re.compile(
+        r"""
+        \.                # literal dot
+        \d{4}-\d{2}-\d{2} # YYYY-MM-DD
+        (?:_\d{2})?       # optional _hh (two digits)
+        (?:_\d{2})?       # optional _mm (two digits)
+        $                 # end of string
+        """,
+        re.VERBOSE,
+    )
+
+    # Flashcard tags: or '#flashcards' or some user defined tag.
+    # We use: '#flashcards' or 'QA_*'. Something like '#QA_myQuestion' will
+    # be splitted into: '#QA/myQuestion'
+    rgx_norm_QA_deck = re.compile(r"^(#QA)_([A-Za-z0-9/_-]+)$", flags=re.IGNORECASE)
+
     return p_root, ext, p_QA, QA_tag
 
 
@@ -124,9 +150,9 @@ def get_cleaned_line(line):
     # clean line from whitespaces; purge horizontal lines.
     if not line.strip():
         return False
-    if re.search(r"-{3,}", line):
+    if re.search(r"-{3,}", line):  # r"-{3,}" == horizontal line
         return False
-    if re.search(r"_{3,}", line):
+    if re.search(r"_{3,}", line):  # r"_{3,}" == horizontal line
         return False
     return True
 
@@ -151,7 +177,7 @@ def get_lo_QA_deck_block(text):
         qa_lines  = lines[1:]
 
         deck_clean = "\n".join(ln for ln in [deck_line] if get_cleaned_line(ln))
-        qa_clean   = "\n".join(ln for ln in qa_lines if get_cleaned_line(ln))
+        qa_clean   = "\n".join(ln for ln in qa_lines    if get_cleaned_line(ln))
 
         # list of decks
         lo_QA_deck = re.findall(rgx_QA_startword, deck_clean)
@@ -232,36 +258,64 @@ def get_QA_ID(QA_A):
 
 def b_test_do_QA(do_QA):
 
-    s_QA_deck    = do_QA["QA_deck"]
-    s_QA         = do_QA["QA"]
-    s_QA_d8_hash = do_QA["QA_d8_hash"]
+    s_QA_deck     = do_QA["QA_deck"]
+    s_QA          = do_QA["QA"]
+    s_QA_d8_hash  = do_QA["QA_d8_hash"]
 
-    s_deck_and_QA            = do_QA["QA_deck"] + ' - ' + s_QA
-    QA_d8_hash = get_d8_hash(s_deck_and_QA)
-    QA_ID = get_QA_ID(s_QA)
+    s_deck_and_QA = do_QA["QA_deck"] + ' - ' + s_QA
+    QA_d8_hash    = get_d8_hash(s_deck_and_QA)
+    QA_ID         = get_QA_ID(s_QA)
 
     return (QA_d8_hash == s_QA_d8_hash)
 
-def get_lo_d_QA_normalized(lo_do_QA, file_path, fn, QA_zotero_hash):
-    # in s_QA extract and purge html comments and hashes
-    lo_do_QA_normalized = []
 
+
+def get_normalized_QA_deck(s_QA_deck):
+    # normalize QA_deck: Obsidian Plugin Spaced Repetition demands as
+
+    # If >s_QA_deck< begins with: '#flashcards'
+    if s_QA_deck.startswith("#flashcards"): return s_QA_deck
+
+    s_QA_deck = re.sub(r"_+", "_", s_QA_deck)
+    m = re.match(rgx_norm_QA_deck, s_QA_deck)
+    if m:
+        # Replace first "_" after the prefix with "/"
+        print(s_QA_deck, m.group(1))
+        return f"{m.group(1)}/{m.group(2)}"
+    else:
+        return f"#flashcards/{s_QA_deck}[1:]"
+
+def get_normalized_lo_d_QA(lo_do_QA, file_path, fn, QA_zotero_hash):
+    # in s_QA:
+    # extract and purge html comments and hashes
+    # normalize Spaced Repetition tag
+
+    lo_do_QA_normalized = []
     for do_QA in lo_do_QA:
         s_QA = do_QA["s_QA"]
 
-        # Extract HTML comment
-        m_comment    = rgx_html_comment.search(s_QA)
-        QA_TimeStamp = m_comment.group(0) if m_comment else None
-
         # Purge HTML comments and old hash-like strings
-        s_clean = rgx_html_comment.sub("", s_QA)
+        # s_clean = rgx_html_comment.sub("", s_QA)
         # s_clean = rgx_QA_SR_hash.sub("", s_clean)
         # s_clean = rgx_QA_ID.sub("", s_clean)
         # s_QA    = s_clean.strip()
-        s_QA    = s_QA.strip()
 
+        # Extract QA_TimeStamp ( is in HTML comment )
+        m_comment    = rgx_html_comment.search(s_QA)
+        QA_TimeStamp = m_comment.group(0) if m_comment else None
+
+        # Purge HTML comments from s_QA
+        s_QA       = rgx_html_comment.sub("", s_QA)
+        s_QA       = s_QA.strip()
+
+        # get Q & A
         QA_Q, QA_A = get_QA_Q_and_A(s_QA)
 
+        # normalize Spaced Repetition tag:
+        qa_tag     = get_normalized_QA_deck(do_QA["QA_deck"])
+
+        do_QA["QA_deck"] = qa_tag
+        # do_QA["QA_deck"] = get_normalized_QA_deck(do_QA["QA_deck"])
         # If there is no "QA_ID" at the end of QA_A
         s_deck_and_QA = do_QA["QA_deck"] + ' - ' + s_QA
         QA_d8_hash = get_d8_hash(s_deck_and_QA)
@@ -596,19 +650,18 @@ def get_lo_qa_entry(file_paths):
         # normalize every d_QA and add hash of Text of QA
         # Normalize and clean QA from Timestamp of Spaced Repetition and ID of tac.py and ...
         # ... add: file_path, fn, QA_zotero_hash
-        lo_do_QA_entry.extend(get_lo_d_QA_normalized(lo_do_QA_entry_org, file_path, fn, QA_zotero_hash))
+        lo_do_QA_entry.extend(get_normalized_lo_d_QA(lo_do_QA_entry_org, file_path, fn, QA_zotero_hash))
     return lo_do_QA_entry
 
 
 def get_lo_do_QA_flashcard(lo_p_fn_flashcard):
-    # (lo_do_QA_flashcard, text, file_path, fn)
     # get all entries in Spaced Repetition obsidian note.
     # get >lo_flashcard< == all Q&As
 
-    lo_flashcard     = []
-    lo_QA_deck_block = []
-    lo_do_QA_flashcard    = []
-
+    lo_flashcard       = []
+    lo_QA_deck_block   = []
+    lo_do_QA_flashcard = []
+    lo_do_QA_entry_org = []
 
     # With every file containing flashcard style QAs:
     for p_fn_flashcard in lo_p_fn_flashcard:
@@ -652,26 +705,9 @@ def get_lo_do_QA_flashcard(lo_p_fn_flashcard):
 
             # file_path = p_fn_flashcard
             # fn = os.path.basename(file_path)
-
-            lo_do_QA_flashcard.extend(get_lo_d_QA_normalized(lo_do_QA_entry_org, file_path = p_fn_flashcard, fn = os.path.basename(p_fn_flashcard), QA_zotero_hash = 'flashcar'))
+        if lo_do_QA_entry_org:
+            lo_do_QA_flashcard.extend(get_normalized_lo_d_QA(lo_do_QA_entry_org, file_path = p_fn_flashcard, fn = os.path.basename(p_fn_flashcard), QA_zotero_hash ='flashcar'))
     return lo_do_QA_flashcard
-
-
-def merge_QA_items(lo_do_qa_entry, lo_do_QA_flashcard):
-    # Get list of all QA from lo_do_QA_flashcard
-    lo_QA_out    = list(lo_do_QA_flashcard)
-    lo_QA_common = list()
-    for qa_entry in lo_do_qa_entry:
-        for do_QA_flashcard in lo_do_QA_flashcard:
-            diff = deepdiff.DeepDiff(qa_entry, do_QA_flashcard, ignore_order=True)
-            if diff:
-                lo_QA_out.append(qa_entry)
-            else:
-                lo_QA_common.append(qa_entry)
-
-    # pprint(lo_QA_out)
-    pprint(lo_QA_common)
-    return lo_QA_out
 
 
 def get_lo_p_fn_flashcard(QA_tag, p_QA):
@@ -679,7 +715,7 @@ def get_lo_p_fn_flashcard(QA_tag, p_QA):
     lo_p_fn_qa = []
     for root, _, files in os.walk(p_QA):
         for fname in files:
-            if fname.endswith('.md'):
+            if fname.endswith('.md') and not b_filter_backup_flashcard_file(fname, '.md'):
                 p_fn = os.path.normpath(os.path.join(root, fname))
                 with open(p_fn, 'r') as f:
                     first_line = f.readline()
@@ -688,34 +724,181 @@ def get_lo_p_fn_flashcard(QA_tag, p_QA):
     return lo_p_fn_qa
 
 
+def get_merge_lo_do_QA(lo_do_qa_entry, lo_do_QA_flashcard):
+    # Make list of all different QA in two lists: lo_do_qa_entry, lo_do_QA_flashcard
+    # Add both lists and then purge duplicates, if any:
+
+    lo_QA_out = []
+
+    lo_QA_out = lo_do_QA_flashcard + lo_do_qa_entry
+    lo_QA_out = sort_and_clear_lo_do_QA(lo_QA_out)
+    return lo_QA_out
+
+def do_p_fn_rename_w_timestamp(lo_p_fn_flashcard, p_QA):
+    # >lo_p_fn_flashcard< == a list of paths and >p_QA< a directory path.
+    # It renames every element >p_fn_flashcard< of >lo_p_fn_flashcard< by adding to the tail of the filename
+    # a string >.YYYY-MM-DD< which is the actual date and keep the extension, which must be >.md<.
+    # If a file with this name already exists add >.YYYY-MM-DD_mm< to it, where 'mm' are minutes.
+    tz = zoneinfo.ZoneInfo("Europe/Berlin")
+    date_str = datetime.now(tz).strftime("%Y-%m-%d")
+    for p_fn in lo_p_fn_flashcard:
+        dir_path, fn = os.path.split(p_fn)
+        name, ext = os.path.splitext(fn)
+        if ext != '.md':
+            continue
+        new_fn = f"{name}.{date_str}{ext}"
+        new_path = os.path.join(dir_path or p_QA, new_fn)
+        counter = 0
+        while os.path.exists(new_path):
+            hrs  = datetime.now(tz).strftime("%H")
+            mins = datetime.now(tz).strftime("%M")
+            new_fn = f"{name}.{date_str}_{hrs}_{mins}{ext}"
+            new_path = os.path.join(dir_path or p_QA, new_fn)
+            counter += 1
+            if counter > 60:
+                break
+        os.rename(p_fn, new_path)
+
+
+def b_filter_backup_flashcard_file(p_fn, s_extension):
+    # Check if the tail of the filename is a string >.YYYY-MM-DD< or a string  >.YYYY-MM-DD_mm< and
+    # if the filename ends with the extension >s_extension< and returns True if so.
+    base, ext = os.path.splitext(p_fn)
+    if ext != s_extension:
+        return False
+    return rgx_flashcard_backup.search(base) is not None
+
+
+def get_duplicates_by_key(lo_do_QA, key):
+    # lo_do_QA: list of dicts
+    # key:   the key you want to check for duplicates, e.g. "QA_ID"
+    values = [d[key] for d in lo_do_QA]
+    counts = Counter(values)
+    return [d for d in lo_do_QA if counts[d[key]] > 1]
+
+def sort_and_clear_lo_do_QA(lo_do_QA_flashcard):
+    # CLears duplicates and sorts by x["QA_ID"]
+    if not lo_do_QA_flashcard:
+        return None
+    lo_do_QA_flashcard.sort(key=lambda x: x["QA_ID"])
+    duplicates = {}
+    for i, do in enumerate(lo_do_QA_flashcard):
+        qa_id = do["QA_ID"]
+        if qa_id in duplicates:
+            duplicates[qa_id].append(i)
+        else:
+            duplicates[qa_id] = [i]
+    for qa_id, indices in duplicates.items():
+        if len(indices) > 1:
+            print('sort_and_clear_lo_do_QA(): ')
+            print(f"Duplicate QA_ID '{qa_id}' at indices: {indices}")
+            lo_do_QA_flashcard = get_duplicates_by_key(lo_do_QA_flashcard, "QA_ID")
+            lo_do_QA_flashcard.sort(key=lambda x: x["QA_ID"])
+
+            pprint (lo_do_QA_flashcard)
+            exit()
+            break
+    return lo_do_QA_flashcard
+
+
+def write_flashcard_file(lo_do_QA_merged, p_QA=r'\obsidian_rh_GoogleDrive\99_QA', fn='flashcards.md'):
+    # Check in directory >p_QA< if there is a file >fn<.
+    # reads the file by calling >get_lo_do_QA_flashcard(lo_p_fn_flashcard)< which returns a list of dicts >lo_do_QA_flashcard<.
+
+    # When finished the program sorts the list of dictionaries >lo_do_QA_flashcard< using an element of >do_QA_flashcard< with the key >"QA_ID"<.
+    # If >do_QA_flashcard< was b_modified_lo_do_QA_flashcard use >do_p_fn_rename_w_timestamp(lo_p_fn_flashcard, p_QA)< to rename the existing version.
+    # Write every element in >lo_do_QA_flashcard< into the new file separating each element from the ather by adding an empty line.
+    # The dictionary has the elements: 'path', 'fn', "QA_deck", "QA", "QA_Q", "QA_A", "QA_TimeStamp", "QA_zotero_hash", "QA_d8_hash", "QA_ID".
+    # Use the keys:  "QA_deck", "QA_Q", "QA_A", "QA_ID", "QA_TimeStamp"  in this order.
+
+    if not lo_do_QA_merged:
+        return None
+
+    # Compose the full path >p_fn< of the file,
+    p_fn = os.path.join(p_QA, fn).replace('\\', '/')
+    # Initialize flashcard file if it does not exist:
+    if not os.path.exists(p_fn):
+        with open(p_fn, 'w') as f:
+            f.write("#flashcards\n")
+
+    # Read the existing flashcard file
+    lo_p_fn_flashcard = [p_fn]
+    lo_do_QA_flashcard = get_lo_do_QA_flashcard(lo_p_fn_flashcard)
+
+    # The function sorts the list >lo_do_QA_flashcard< of dictionaries >do_QA_flashcard< by the element of >do_QA_flashcard< with the key >"QA_ID"<.
+    # If there are two or more dictionaries >do_QA_flashcard< with identical value in key >"QA_ID"< then print these values and exit.
+    lo_do_QA_flashcard = sort_and_clear_lo_do_QA(lo_do_QA_flashcard)
+    # The function sorts the list >lo_do_QA_merged< of dictionaries >do_QA_flashcard< by the element of >do_QA_flashcard< with the key >"QA_ID"<.
+    # If there are two or more dictionaries >do_QA_flashcard< with identical value in key >"QA_ID"< then print these values and exit.
+    lo_do_QA_merged    = sort_and_clear_lo_do_QA(lo_do_QA_merged)
+
+    # For every element >do_QA_flashcard_updated< in >lo_do_QA_merged<, which is a list of dictionaries,
+    # the program checks if it is present in >lo_do_QA_flashcard<. If not it appends this element to >lo_do_QA_flashcard<.
+    b_modified_lo_do_QA_flashcard = False
+    # There are QA
+    for do_QA_merged in lo_do_QA_merged:
+        if lo_do_QA_flashcard:
+            if not any(d["QA_ID"] == do_QA_merged["QA_ID"] for d in lo_do_QA_flashcard):
+                lo_do_QA_flashcard.append(do_QA_merged)
+                b_modified_lo_do_QA_flashcard = True
+        else:
+            lo_do_QA_flashcard = []
+            lo_do_QA_flashcard.append(do_QA_merged)
+            b_modified_lo_do_QA_flashcard = True
+
+    if b_modified_lo_do_QA_flashcard:
+        do_p_fn_rename_w_timestamp(lo_p_fn_flashcard, p_QA)
+
+    if lo_do_QA_flashcard:
+        lo_do_QA_flashcard.sort(key=lambda x: x["QA_ID"])
+        with open(p_fn, 'w', encoding='utf-8') as f:
+            for do in lo_do_QA_flashcard:
+                lines = [
+                    str(do.get("QA_deck", "")),
+                    str(do.get("QA_Q", "")),
+                    '?',
+                    str(do.get("QA_A", "")),
+                    '.',
+                    str(do.get("fn", "")),
+                    str(do.get("QA_ID", "")),
+                    str(do.get("QA_TimeStamp", ""))
+                ]
+                f.write('\n'.join(lines) + '\n\n')
 
 def main():
     ini_path = 'tac.ini'
     p_root, ext, p_QA, QA_tag = load_config(ini_path)
 
-    all_files   = find_files_with_extension(p_root, ext)
+    # all obsidian notes in file system:
+    all_notes_md   = find_files_with_extension(p_root, ext)
 
     # get >lo_do_QA_entry< == list of all QA in *.md but not in QA-files (flashcard|anki| ...)
     lo_do_QA_entry = []
-    lo_do_QA_entry.extend(get_lo_qa_entry(all_files))
+    lo_do_QA_entry.extend(get_lo_qa_entry(all_notes_md))
 
     # pprint(lo_do_QA_entry)
     # print("Total QA entries:", len(lo_do_QA_entry))
 
-    # get >lo_p_fn_flashcard< == files that contain Q&As in flashcard (== Spaced Repetition) format
+    # get FILE NAMES: >lo_p_fn_flashcard< == FILES that contain Q&As in flashcard format (== Spaced Repetition)
     lo_p_fn_flashcard = get_lo_p_fn_flashcard(QA_tag, p_QA)
 
-    # get >lo_do_QA_flashcard< == all Q&A as list of dict of Q&A
+    # get >lo_do_QA_flashcard< == list of dict of all Q&A from flashcard FILES
     lo_do_QA_flashcard = []
     lo_do_QA_flashcard.extend(get_lo_do_QA_flashcard(lo_p_fn_flashcard))
 
     # pprint(lo_do_QA_flashcard)
     # print("Total QA entries:", len(lo_do_QA_flashcard))
 
-    lo_do_QA_flashcard_updated = merge_QA_items(lo_do_QA_entry, lo_do_QA_flashcard)
-    pprint(lo_do_QA_flashcard_updated)
-    print("Total QA entries:", len(lo_do_QA_flashcard_updated))
+    lo_do_QA_merged = get_merge_lo_do_QA(lo_do_QA_entry, lo_do_QA_flashcard)
+    pprint(lo_do_QA_merged)
+    print("Total QA entries:", len(lo_do_QA_entry))
+    print("Total QA_flashcard entries:", len(lo_do_QA_flashcard))
+    # print("Total QA_flashcard entries updated:", len(lo_do_QA_merged))
+    # print("Total QA entries:", len(lo_do_QA_flashcard))
+    # pprint(lo_do_QA_merged)
 
+    # write_flashcard_file(lo_do_QA_merged, p_QA=r'\obsidian_rh_GoogleDrive\99_QA', fn='flashcards.md')
+    write_flashcard_file(lo_do_QA_merged, p_QA = p_QA, fn='flashcards.md')
 
 if __name__ == "__main__":
     main()
