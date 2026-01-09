@@ -25,10 +25,10 @@ import yaml
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from io import StringIO
-from typing import Optional, Collection
+from pathlib import Path
 from tkinter import messagebox, Tk
+from typing import Optional, Collection
 
 path_data = Path(r"C:\Users\rh\Meine Ablage")
 
@@ -181,6 +181,68 @@ rgx_windows_fn          = re.compile(r'^(?!^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(
 rgx_forbidden_chars     = r'\\/:*?"<>|'
 
 
+def show_info_popup(messages=None):
+    """
+    A standalone function to display a GUI popup with script info and custom messages.
+    Usage: show_info_popup([("Header 1", "Message 1 text"), ("Header 2", "Message 2 text")])
+    """
+
+    import tkinter as tk
+    from tkinter import ttk
+    import os
+    import sys
+
+    root = tk.Tk()
+    root.title("Script Information")
+
+    script_name = os.path.basename(sys.argv[0]) if sys.argv[0] else "Unknown Script"
+
+    # Main container
+    main_frame = ttk.Frame(root, padding="20")
+    main_frame.pack(fill='both', expand=True)
+
+    # 1. Calling Script Section
+    ttk.Label(main_frame, text="Source Script:", font=('Helvetica', 10, 'bold')).pack(anchor='w')
+    ttk.Label(main_frame, text=script_name, foreground="#0056b3").pack(anchor='w', pady=(0, 10))
+
+    # 2. Horizontal Separator
+    ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=10)
+
+    # 3. Dynamic Message Section
+    if messages:
+        for header, body in messages:
+            ttk.Label(main_frame, text=f"{header}:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+            # Removed wraplength to allow horizontal expansion
+            ttk.Label(main_frame, text=str(body), justify="left").pack(anchor='w', pady=(0, 10))
+
+    # 4. Close Button
+    btn_close = ttk.Button(main_frame, text="Close", command=root.destroy)
+    btn_close.pack(pady=(10, 0))
+    btn_close.focus_set()
+
+    # 5. Dynamic Sizing and Centering
+    root.update_idletasks()
+
+    # Get the required width to fit all content without wrapping
+    req_width = root.winfo_reqwidth()
+    req_height = root.winfo_reqheight()
+
+    # Apply a small buffer for aesthetics
+    width = req_width + 40
+    height = req_height
+
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+
+    # Set geometry: width x height + x_offset + y_offset
+    root.geometry(f'{width}x{height}+{x}+{y}')
+
+    # Visual Polish: Bring to front
+    root.attributes('-topmost', True)
+    root.after(100, lambda: root.attributes('-topmost', False))
+
+    root.mainloop()
+
 def get_date_time():
     s_date_iso  = datetime.now().isoformat()
     s_date_     = datetime.now().date().isoformat()
@@ -272,7 +334,7 @@ def merge_without_duplicates(l_word_1, l_word_2):
         return sorted sum of lists
     """    
     set_word_1 = set(l_word_1)
-    # Remove lo_do_QA from l_word_2 that are also in l_word_1
+    # Remove lo_do_QA_SR_raw from l_word_2 that are also in l_word_1
     filtered_l_word_2 = [word for word in l_word_2 if word not in set_word_1]
     # Combine l_word_1 and the filtered l_word_2
     result = set_word_1 | set(filtered_l_word_2)
@@ -378,7 +440,7 @@ def check_and_update_s_content_hash (l_p_fn_note) -> str:
     """
     If content changed:
       Create copy of file && increment version.
-      l_p_fn_note_new (str) : list of paths of file with fn beginning with citekey.
+      l_p_fn_note_new (str) : list of paths of file with fn_QA_SR beginning with citekey.
     """
 
     for p_fn_note in l_p_fn_note:
@@ -485,7 +547,7 @@ def do_write_atomic_note(note_source, l_p_fn_note, cnt_notes_written) -> int :
     # there are previous versions of >s_content< with file name >s_content.p_fn< in file system:
     # the most recent version of >s_content< (== note_summary|annotation) in file system are in >l_p_fn_note<
     else:
-        # >l_p_fn_note<: list of fn, that begin with zotero-citekey of s_content.
+        # >l_p_fn_note<: list of fn_QA_SR, that begin with zotero-citekey of s_content.
         # Search note_fs in >l_p_fn_note< that has a >san_zotero_hash< identical to that of >s_content<:
         #  => >p_fn_note< == latest previous version of s_content  (earlier versions are not in >l_p_fn_note<).
 
@@ -633,7 +695,7 @@ def compose_and_write_atomic_note_summary(note_summary, note_source, idx, l_p_fn
 
     # get filename of note_summary:
     s_note_title           = "Summary"
-    # note_summary.fn       = compose_note_fn(note_source.note_source_fn, s_idx, s_note_title)
+    # note_summary.fn_QA_SR       = compose_note_fn(note_source.note_source_fn, s_idx, s_note_title)
     note_summary.fn       = compose_note_fn(note_source.fn, s_idx, s_note_title)
     note_summary.p_fn     = os.path.join(path_out, note_summary.fn)
 
@@ -888,7 +950,7 @@ def split_note_source_in_atomic_notes(p_note_source_fn: Path):
 
     # get latest versions of all atomic notes in file system of >s_content<
     l_p_fn_note = get_l_fn_note_with_citekey(note_source.d_frontmatter['zotero_fields']['citekey'])
-    # update >content_hash< of _all_ notes in >l_p_fn_note< == all notes with fn beginning with citekey.
+    # update >content_hash< of _all_ notes in >l_p_fn_note< == all notes with fn_QA_SR beginning with citekey.
     check_and_update_s_content_hash(l_p_fn_note)
 
     idx = 0 ; cnt_notes_written = 0
@@ -943,22 +1005,22 @@ def get_s_tags_in(s_summary: str) -> str:
 
 def get_l_fn_note_with_citekey(s_note_source_citekey: str) -> list[str]:
     '''
-    Find all atomic notes with fn beginning with >s_note_source_citekey<.
+    Find all atomic notes with fn_QA_SR beginning with >s_note_source_citekey<.
     If there are multiple versions of an atomic s_content, filter the latest/highest version...
        Try to insert the filename, version etc into a double nested dict.
        If there is a older version inside the double nested dict substitute it by the newer one.
     '''
 
-    # l_p_fn_note = list of all path_fn in >path_out< where fn begins with citekey (of zotero s_content source)
+    # l_p_fn_note = list of all path_fn in >path_out< where fn_QA_SR begins with citekey (of zotero s_content source)
     p_path     = os.path.join(path_out, s_note_source_citekey + '_*')
     l_p_fn_all = glob.glob(p_path)
-    # == all notes in >path_out< with fn beginning with citekey
+    # == all notes in >path_out< with fn_QA_SR beginning with citekey
     # == >citekey_XYZ_vs_NNNN.md< or >citekey_XYZ.md<
 
     # >d_d_< means double nested dict.
     d_d_note_latest = make_default_dict()
 
-    # kind of complicated ... get the most recent version in >l_p_fn_all< of s_content with fn == >citekey_XYZ_vs_NNNN.md<.
+    # kind of complicated ... get the most recent version in >l_p_fn_all< of s_content with fn_QA_SR == >citekey_XYZ_vs_NNNN.md<.
     # Should be simply >citekey_XYZ.md<.
     for p_fn in l_p_fn_all:
         _, d_frontmatter, s_content = get_note_source_parts(p_fn)
@@ -1020,7 +1082,7 @@ zotero-citations  are                     citations                       + evtl
 
 zotero-citations können mittels einem zotero-Plugin (zotmoov (2025-09-22)) nach obsidian_zotero exportiert werden.
 
->san(fn)< wandelt eine zotero -> obsidian_zotero *.md Note mit Annotations (Zitat + Kommentar)
+>san(fn_QA_SR)< wandelt eine zotero -> obsidian_zotero *.md Note mit Annotations (Zitat + Kommentar)
 in mehrere 'atomic' obsidian_zotero *.md Notes um, wobei jede der resultierenden 'atomic' obsidian_zotero *.md Notes
 jeweils ein Zitat +- Kommentar enthält. Dazu kommen jeweils die Tags der ursprünglichen gesamt Note, ergänzt
 um tags, die bei dem jeweiligen spezifischen Zitat angefügt wurden.
@@ -1046,7 +1108,7 @@ Die Ursprungs- 'gesamt' obsidian_zotero-s_content mit allen Einzelzitaten hat fo
 
     ###### 24Y6D63Q
     ## These_24Y6D63Q
-    lorem ipsum ... [@bleasePaternalismus2016] [(p. 29)](zotero://open-pdf/library/lo_do_QA/4TCCEDY7?page=29&annotation=24Y6D63Q)
+    lorem ipsum ... [@bleasePaternalismus2016] [(p. 29)](zotero://open-pdf/library/lo_do_QA_SR_raw/4TCCEDY7?page=29&annotation=24Y6D63Q)
     %% Annotation_24Y6D63Q: annotatedText %%
 
     ### Kommentar
@@ -1143,22 +1205,46 @@ def b_san_nunjucks_version_exists(p_fn: str):
 
 if __name__ == '__main__':
     # sys.argv[1] == >note.md< to be splitted.
+
+    # l_s_popup = [
+    #     ("Status", "The operation completed successfully."),
+    #     ("Details", "Processed 15 files in the root directory."),
+    #     ("Notes", "No errors were encountered during the run.")
+    # ]
+    #
+    # show_info_popup(l_s_popup)
+    # exit()
+
     print()
     if len(sys.argv) > 1:
         fn_note_source = sys.argv[1]
         print(f"Received s_content: {fn_note_source}")
+        p_fn_note_source: Path = Path(os.path.join(path_in, fn_note_source))
+        print(f"Full path of >note.md< to read: {p_fn_note_source = }\n")
+
+        l_s_popup = [("File:", f"{fn_note_source}"), ("File (with path):", f"{p_fn_note_source}")]
+        show_info_popup(l_s_popup)
+
     else:  # Test
         fn_note_source = "bismarkLegal2012.md"
         # fn_note_source = "bleasePaternalismus2016.2025-11-14._ok_.md"
         # fn_note_source = "bleasePaternalismus2016.md"
         print(f"No >note.md< name provided, take >{fn_note_source}<")
+        p_fn_note_source: Path = Path(os.path.join(path_in, fn_note_source))
+        print(f"Full path of >note.md< to read: {p_fn_note_source = }\n")
+
+        l_s_popup = [("No file parameter found.", f"Try default: {fn_note_source}"), ("File (with path):", f"{p_fn_note_source}"),]
+        show_info_popup(l_s_popup)
 
     p_fn_note_source: Path = Path(os.path.join(path_in, fn_note_source))
     print(f"Full path of >note.md< to read: {p_fn_note_source = }\n")
 
     cnt_notes_written = 0
     b_check_path_exists(l_path = [path_in, p_fn_note_source])
-    if not b_san_nunjucks_version_exists(p_fn_note_source): exit()
+    if not b_san_nunjucks_version_exists(p_fn_note_source):
+        l_s_popup = [("File:", f"{fn_note_source}"), ("Not a note with zotero annotations -> exit:", f"")]
+        show_info_popup(l_s_popup)
+        exit()
 
     cnt_notes_written = split_note_source_in_atomic_notes(p_fn_note_source)
 
@@ -1172,24 +1258,24 @@ if __name__ == '__main__':
 #   Aber es gibt ja den >content_hash< ?
 #   Am besten umbenennen >annotation_text_hash< ?
 
-
 # nb:
 #  pip freeze > requirements.txt
 #  .
+#  To change or delete tags in onsidian notes:
 #  find . -name '*.md' -exec sed -i -e 'QA_A/string_111/string_222/g' {} \;
 #  .
-#  >san.py<  transform in *.exe
+#  >*.py<  transform in *.exe
 #       >_ pip install pyinstaller
 #       >_ pyinstaller --onefile -w 'san.py'
-#       .
+#  .
 #  Obsidian community plugin: 'Shell commands' calls >san.exe< via shortcut
 #    https://github.com/Taitava/obsidian-shellcommands
-#    .
+#  .
 #    ctrl-P > Shell commands: Execute Split Into Annotation Notes (SAN)
 #    >_Shell commands: (insert:)
 #      "C:\Users\rh\Meine Ablage\obsidian_rh_GoogleDrive\zz_Templates_Scripts\Nunjucks_Templates\san.exe" "{{file_path:absolute}}"
 #         /* Do not forget the quotation marks! */
-#         /* with:  "{{file_path:absolute}}"  ==   "Gives the current file name with file extension" */
+#         /* with:  "{{file_path:absolute}}"  ==   "Gives the current file name with file ext" */
 #      Output: Outputchannel for stdout: Notification balloon
 #      Output: Outputchannel for stderr: Error balloon
 
