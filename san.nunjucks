@@ -86,8 +86,8 @@ ___
 {% endif -%}
    {#- (Only tags - everything else will be deleted.) -#}
 ### QA                                      %% QA %% 
-Q:
-A:
+Q: 
+A: 
 {# #ToDo_QA #}
    {#- references == links to citations in zotero|internet #}
 ___

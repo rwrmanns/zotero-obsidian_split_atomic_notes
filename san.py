@@ -1,4 +1,4 @@
-doc = '''
+doc = r'''
 The script san.py (compiled to san.exe) serves to split an input obsidian >zotero_note.md< into separate atomic notes.  
 
 Workflow: 
@@ -51,10 +51,11 @@ from pathlib import Path
 from tkinter import messagebox, Tk
 from typing import Optional, Collection
 
-path_data = Path(r"C:\Users\rh\Meine Ablage")
+path_root = Path(r"C:\Users\rh\Meine Ablage\obsidian_rh_GoogleDrive\DEFAULT")
 
-path_in   = Path(r"C:\Users\rh\Meine Ablage\obsidian_rh_GoogleDrive\02_Notes_zotero_Annotations")
-path_out  = path_in
+path_in        = str()
+path_out       = str()
+fn_note_source = str()
 
 root = Tk()
 root.withdraw()
@@ -202,17 +203,11 @@ rgx_windows_fn          = re.compile(r'^(?!^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(
 rgx_forbidden_chars     = r'\\/:*?"<>|'
 
 
-def show_info_popup(messages=None):
+
+def show_info_popup(lo_messages=None):
     """
     A standalone function to display a GUI popup with script info and custom messages.
-    Usage: show_info_popup([("Header 1", "Message 1 text"), ("Header 2", "Message 2 text")])
-
-    l_s_popup = [
-        ("Status", "The operation completed successfully."),
-        ("Details", "Processed 15 files in the root directory."),
-        ("Notes", "No errors were encountered during the run.")
-    ]
-    show_info_popup(l_s_popup)
+    Fixed: Explicit quit/destroy sequence to prevent debugger/script hangs.
     """
 
     import tkinter as tk
@@ -223,7 +218,16 @@ def show_info_popup(messages=None):
     root = tk.Tk()
     root.title("Script Information")
 
-    script_name = os.path.basename(sys.argv[0]) if sys.argv[0] else "Unknown Script"
+    s_script_name = os.path.basename(sys.argv[0]) if sys.argv[0] else "Unknown Script"
+
+    # --- New Behavior: Unified Exit Function ---
+    def on_exit():
+        """Stops the mainloop and then destroys the widgets."""
+        root.quit()    # This allows the debugger to move past root.mainloop()
+        root.destroy() # This cleans up the UI resources
+
+    # Bind the window's "X" close button to the unified exit function
+    root.protocol("WM_DELETE_WINDOW", on_exit)
 
     # Main container
     main_frame = ttk.Frame(root, padding="20")
@@ -231,20 +235,19 @@ def show_info_popup(messages=None):
 
     # 1. Calling Script Section
     ttk.Label(main_frame, text="Source Script:", font=('Helvetica', 10, 'bold')).pack(anchor='w')
-    ttk.Label(main_frame, text=script_name, foreground="#0056b3").pack(anchor='w', pady=(0, 10))
+    ttk.Label(main_frame, text=s_script_name, foreground="#0056b3").pack(anchor='w', pady=(0, 10))
 
     # 2. Horizontal Separator
     ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=10)
 
     # 3. Dynamic Message Section
-    if messages:
-        for header, body in messages:
-            ttk.Label(main_frame, text=f"{header}:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
-            # Removed wraplength to allow horizontal expansion
-            ttk.Label(main_frame, text=str(body), justify="left").pack(anchor='w', pady=(0, 10))
+    if lo_messages:
+        for s_header, s_body in lo_messages:
+            ttk.Label(main_frame, text=f"{s_header}:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+            ttk.Label(main_frame, text=str(s_body), justify="left").pack(anchor='w', pady=(0, 10))
 
-    # 4. Close Button
-    btn_close = ttk.Button(main_frame, text="Close", command=root.destroy)
+    # 4. Close Button - Updated command to use on_exit
+    btn_close = ttk.Button(main_frame, text="Close", command=on_exit)
     btn_close.pack(pady=(10, 0))
     btn_close.focus_set()
 
@@ -262,13 +265,13 @@ def show_info_popup(messages=None):
     x = (root.winfo_screenwidth() // 2) - (width // 2)
     y = (root.winfo_screenheight() // 2) - (height // 2)
 
-    # Set geometry: width x height + x_offset + y_offset
     root.geometry(f'{width}x{height}+{x}+{y}')
 
     # Visual Polish: Bring to front
     root.attributes('-topmost', True)
     root.after(100, lambda: root.attributes('-topmost', False))
 
+    # This loop is what blocks the debugger. root.quit() breaks this loop.
     root.mainloop()
 
 def get_date_time():
@@ -349,7 +352,7 @@ def get_value_from_dict(d_dict: dict, s_keys: str) -> Optional[str]:
     return d_current
 
 def get_value_from_dict_of_path(p_fn: str, s_keys: str) -> Optional[str]:
-    # If >p_fn< is a path of a >note.md<, then get the val of an entry in frontmatter (frontmatter is a dict).
+    # If >p_fn_note_source< is a path of a >note.md<, then get the val of an entry in frontmatter (frontmatter is a dict).
     if Path(p_fn).is_file():
         _, d_frontmatter, _ = get_note_source_parts(p_fn)
         return get_value_from_dict(d_dict = d_frontmatter, s_keys = s_keys)
@@ -572,7 +575,7 @@ def do_write_atomic_note(note_source, l_p_fn_note, cnt_notes_written) -> int :
             f_out.write(s_note)
         p_fn_note    = note_source.p_fn
 
-    # there are previous versions of >s_content< with file name >s_content.p_fn< in file system:
+    # there are previous versions of >s_content< with file name >s_content.p_fn_note_source< in file system:
     # the most recent version of >s_content< (== note_summary|annotation) in file system are in >l_p_fn_note<
     else:
         # >l_p_fn_note<: list of fn_QA_SR, that begin with zotero-citekey of s_content.
@@ -658,7 +661,7 @@ def do_write_atomic_note(note_source, l_p_fn_note, cnt_notes_written) -> int :
 
     if (p_fn_note != '') and (result != 'ok'):
         cnt_notes_written += 1
-        print(f'Note written to: >{os.path.basename(p_fn_note)}<.')
+        print(f'do_write_atomic_note(): Note written to: \n>{os.path.basename(p_fn_note)}<\n>{p_fn_note}<.')
     elif (result == 'ok'):
         pass
     else:
@@ -931,7 +934,7 @@ def split_note_source_in_atomic_notes(p_note_source_fn: Path):
     b_do_write = False
     b_do_write = True   # write atomic notes
 
-    # Define file_in p_fn: Pfad in dem die input-file: *.md Note ist.
+    # Define file_in p_fn_note_source: Pfad in dem die input-file: *.md Note ist.
     note_source_fn    = os.path.basename(p_note_source_fn)
 
     note_source       = Note()
@@ -972,9 +975,13 @@ def split_note_source_in_atomic_notes(p_note_source_fn: Path):
     note_summary.s_references   = s_references
 
     global path_out
-    path_out = Path(os.path.join(path_in, citekey + '_Annotations'))
+    # path_out = Path(os.path.join(path_in, citekey + '_Annotations'))
+    path_out = Path(os.path.join(path_in, Path(os.path.basename(fn_note_source)).stem + '_Annotations'))
     if not os.path.exists(path_out):
         os.makedirs(path_out)
+
+    print(f"Output path: \n  {path_out = }\n")
+
 
     # get latest versions of all atomic notes in file system of >s_content<
     l_p_fn_note = get_l_fn_note_with_citekey(note_source.d_frontmatter['zotero_fields']['citekey'])
@@ -1069,26 +1076,26 @@ def get_l_fn_note_with_citekey(s_note_source_citekey: str) -> list[str]:
                         # insert newer version:
                         d_d_note_latest[f'{zotero_hash}']['source_zotero_hash'] = d_frontmatter['san']['source_zotero_hash']
                         d_d_note_latest[f'{zotero_hash}']['zotero_hash']        = d_frontmatter['san']['zotero_hash']
-                        d_d_note_latest[f'{zotero_hash}']['p_fn']               = p_fn
+                        d_d_note_latest[f'{zotero_hash}']['p_fn_note_source']               = p_fn
                         d_d_note_latest[f'{zotero_hash}']['note_version']       = d_frontmatter['san']['note_version']
                 else:
                     # since there is no version => there is no entry => add entry
                     d_d_note_latest[f'{zotero_hash}']['source_zotero_hash'] = d_frontmatter['san']['source_zotero_hash']
                     d_d_note_latest[f'{zotero_hash}']['zotero_hash']        = d_frontmatter['san']['zotero_hash']
-                    d_d_note_latest[f'{zotero_hash}']['p_fn']               = p_fn
+                    d_d_note_latest[f'{zotero_hash}']['p_fn_note_source']               = p_fn
                     d_d_note_latest[f'{zotero_hash}']['note_version']       = d_frontmatter['san']['note_version']
             # KeyError shouldn't occur since >d_d_note_latest< is an >collections.defaultdict()< where keys are always present
             except KeyError:
                 d_d_note_latest[f'{zotero_hash}']['source_zotero_hash'] = d_frontmatter['san']['source_zotero_hash']
                 d_d_note_latest[f'{zotero_hash}']['zotero_hash']        = d_frontmatter['san']['zotero_hash']
-                d_d_note_latest[f'{zotero_hash}']['p_fn']               = p_fn
+                d_d_note_latest[f'{zotero_hash}']['p_fn_note_source']               = p_fn
                 d_d_note_latest[f'{zotero_hash}']['note_version']       = d_frontmatter['san']['note_version']
 
     l_p_fn_note = []
     if d_d_note_latest:
         for k_san_zotero_hash, d_key_val in d_d_note_latest.items():
             for key, val in d_key_val.items():
-                if key == 'p_fn':
+                if key == 'p_fn_note_source':
                     l_p_fn_note.append(val)
 
     return l_p_fn_note
@@ -1216,55 +1223,54 @@ angefügt werden und bestehende annotations nicht verändert werden. (HOFFENTLIC
 def b_check_path_exists(l_path: list[Path]):
     for p_fn in l_path:
         if not p_fn.exists():
-            msg = f"{p_fn =} does not exist => exit()."
+            msg = f"Error: b_check_path_exists(): \nError: {p_fn = } does not exist => exit()."
+            print(msg)
             messagebox.showinfo(f"{os.path.basename(p_fn) =}", msg)
             exit()
     return True
 
 
-def b_san_nunjucks_version_exists(p_fn: str):
+def b_san_nunjucks_version_exists(p_fn_note_source: str):
     if not get_value_from_dict_of_path(p_fn_note_source, "['san']['nunjucks_template']['version']"):
-        msg = f"function b_san_nunjucks_version_exists(): \n\n{os.path.basename(p_fn)} \n\nNo nunjucks-template signature found? => exit()."
-        messagebox.showinfo(f"{os.path.basename(p_fn) =}", msg)
+        msg = f"function b_san_nunjucks_version_exists(): \n\n{os.path.basename(p_fn_note_source)} \n\nNo nunjucks-template signature found? => exit()."
+        messagebox.showinfo(f"{os.path.basename(p_fn_note_source) =}", msg)
         return False
     else:
         return True
 
 
-if __name__ == '__main__':
-    # sys.argv[1] == >note.md< to be splitted.
+def main():
+    global path_in
+    global fn_note_source
 
-    print()
     if len(sys.argv) > 1:
         fn_note_source = sys.argv[1]
         print(f"Received s_content: {fn_note_source}")
-        p_fn_note_source: Path = Path(os.path.join(path_in, fn_note_source))
+        p_fn_note_source = Path(fn_note_source)
         print(f"Full path of >note.md< to read: {p_fn_note_source = }\n")
 
-        l_s_popup = [("File", f"{fn_note_source}"), ("File (with path)", f"{p_fn_note_source}")]
+        l_s_popup = [("File", f"{os.path.basename(fn_note_source)}"), ("File (with path)", f"{p_fn_note_source}")]
         show_info_popup(l_s_popup)
         print(doc)
 
-    else:  # Test
-        fn_note_source = "bismarkLegal2012.md"
-        # fn_note_source = "bleasePaternalismus2016.2025-11-14._ok_.md"
-        # fn_note_source = "bleasePaternalismus2016.md"
-        print(f"No >note.md< name provided, take >{fn_note_source}<")
-        p_fn_note_source: Path = Path(os.path.join(path_in, fn_note_source))
-        print(f"Full path of >note.md< to read: {p_fn_note_source = }\n")
-
-        l_s_popup = [("No file parameter found.", f"Try default: {fn_note_source}"), ("File (with path):", f"{p_fn_note_source}"),]
-        l_s_popup = [("Info", f"{doc}"), ("File", f"{fn_note_source}"), ("File (with path)", f"{p_fn_note_source}")]
+    else:
+        print(f"No >note.md< name provided.")
+        l_s_popup = [("No file parameter found.", f""), ("exit()", f""),]
         show_info_popup(l_s_popup)
         exit()
 
-    p_fn_note_source: Path = Path(os.path.join(path_in, fn_note_source))
-    print(f"Full path of >note.md< to read: {p_fn_note_source = }\n")
+
+    path_in  = os.path.dirname(p_fn_note_source)
+    # path_out is defined in >split_note_source_in_atomic_notes()<
+    print(f"Input path: \n  {path_in = }\n")
+
 
     cnt_notes_written = 0
-    b_check_path_exists(l_path = [path_in, p_fn_note_source])
+    # b_check_path_exists(l_path = [path_in, p_fn_note_source])
+    b_check_path_exists(l_path = [p_fn_note_source])
     if not b_san_nunjucks_version_exists(p_fn_note_source):
-        l_s_popup = [("File:", f"{fn_note_source}"), ("Not a note with zotero annotations -> exit:", f"")]
+        mssge = "ERROR: main(): Not a note with zotero annotations -> exit()"
+        l_s_popup = [("File:", f"{fn_note_source}"), (mssge, f"")]
         show_info_popup(l_s_popup)
         exit()
 
@@ -1273,6 +1279,13 @@ if __name__ == '__main__':
     if cnt_notes_written:
         backup_note_source_with_timestamp(p_fn_note_source)
         # backup_note_source(p_fn_note_source)
+
+if __name__ == '__main__':
+    main()
+    # sys.argv[1] == >note.md< to be splitted.
+
+
+
 
 # ToDo:
 #   Was ist >zotero_hash< genau? Wert kommt jedenfalls nicht von zotero.
@@ -1301,5 +1314,3 @@ if __name__ == '__main__':
 #  find . -name '*.md' -exec sed -i -e 'QA_A/string_111/string_222/g' {} \;
 #   .
 #   grep -rli --include="*.md" "print filename of file containing this string" .
-
-

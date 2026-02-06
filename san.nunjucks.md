@@ -9,7 +9,7 @@
 {# Three underscores at begin of line -> horizontal line. -#}
 {# Minus sign at beginning/end of comment eats up spaces -#}
 {# \n == two spaces at begin of line  -#}
-{# https://github.com/alex-kline/obsidian-zotero/ -#}
+{# https://github.com/rwrmanns/zotero-obsidian_split_atomic_notes -#}
 {% if citekey %}title: {{citekey}}{% endif %}
 cssclass: research-note
 {% set vars = [
@@ -86,9 +86,9 @@ ___
 {% endif -%}
    {#- (Only tags - everything else will be deleted.) -#}
 ### QA                                      %% QA %% 
-Q:
-A:
-#ToDo_QA
+Q: 
+A: 
+{# #ToDo_QA #}
    {#- references == links to citations in zotero|internet #}
 ___
 %% references %%
@@ -131,7 +131,7 @@ ___
 ### QA                                      %% QA %% 
 Q:
 A:
-#ToDo_QA 
+{# #ToDo_QA #}
 ___
 %% references %%
 {% set separator = "    ····    " -%}

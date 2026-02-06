@@ -16,7 +16,8 @@ The paths pf the obsidian notes are configured in >tac.ini<
 
 QA-text blocks begin with a specific tag (QA-tag) followed by a Question - Answer section.
 
-Script checks if QA-text blocks already transfered, if not it changes the tag to the SR-format and adds the block.
+Script checks if QA-text blocks are already transferred into the specific obsidian flashcard notes.
+If not it changes the tag to the SR-format and adds the block.
 Every QA-text block gets a individual hash value >QA_ID<, specific of QA-Text, file origin and QA-tag.
 The filename of obsidian note is added.
 
@@ -61,6 +62,7 @@ from collections import Counter
 from datetime import date
 from datetime import datetime
 from os.path import basename
+from pathlib import Path
 from pprint import pprint
 from re import split
 
@@ -134,6 +136,77 @@ def get_rgx_QA_block():
     )
     return rgx_QA_block, rgx_start
 
+def show_info_popup(lo_messages=None):
+    """
+    A standalone function to display a GUI popup with script info and custom messages.
+    Fixed: Explicit quit/destroy sequence to prevent debugger/script hangs.
+    """
+
+    import tkinter as tk
+    from tkinter import ttk
+    import os
+    import sys
+
+    root = tk.Tk()
+    root.title("Script Information")
+
+    s_script_name = os.path.basename(sys.argv[0]) if sys.argv[0] else "Unknown Script"
+
+    # --- New Behavior: Unified Exit Function ---
+    def on_exit():
+        """Stops the mainloop and then destroys the widgets."""
+        root.quit()    # This allows the debugger to move past root.mainloop()
+        root.destroy() # This cleans up the UI resources
+
+    # Bind the window's "X" close button to the unified exit function
+    root.protocol("WM_DELETE_WINDOW", on_exit)
+
+    # Main container
+    main_frame = ttk.Frame(root, padding="20")
+    main_frame.pack(fill='both', expand=True)
+
+    # 1. Calling Script Section
+    ttk.Label(main_frame, text="Source Script:", font=('Helvetica', 10, 'bold')).pack(anchor='w')
+    ttk.Label(main_frame, text=s_script_name, foreground="#0056b3").pack(anchor='w', pady=(0, 10))
+
+    # 2. Horizontal Separator
+    ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=10)
+
+    # 3. Dynamic Message Section
+    if lo_messages:
+        for s_header, s_body in lo_messages:
+            ttk.Label(main_frame, text=f"{s_header}:", font=('Helvetica', 9, 'bold')).pack(anchor='w')
+            ttk.Label(main_frame, text=str(s_body), justify="left").pack(anchor='w', pady=(0, 10))
+
+    # 4. Close Button - Updated command to use on_exit
+    btn_close = ttk.Button(main_frame, text="Close", command=on_exit)
+    btn_close.pack(pady=(10, 0))
+    btn_close.focus_set()
+
+    # 5. Dynamic Sizing and Centering
+    root.update_idletasks()
+
+    # Get the required width to fit all content without wrapping
+    req_width = root.winfo_reqwidth()
+    req_height = root.winfo_reqheight()
+
+    # Apply a small buffer for aesthetics
+    width = req_width + 40
+    height = req_height
+
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+
+    root.geometry(f'{width}x{height}+{x}+{y}')
+
+    # Visual Polish: Bring to front
+    root.attributes('-topmost', True)
+    root.after(100, lambda: root.attributes('-topmost', False))
+
+    # This loop is what blocks the debugger. root.quit() breaks this loop.
+    root.mainloop()
+
+
 
 def load_config(ini_path):
     global rgx_QA_exclude
@@ -161,15 +234,53 @@ def load_config(ini_path):
     global QA_tag
     global SR_tag
 
-    config = configparser.ConfigParser()
-    config.read(ini_path)
+    pwd_path  = os.path.dirname(os.path.realpath(__file__))
+    l_s_popup = [("pwd", f"{pwd_path =}")]
 
+    config     = configparser.ConfigParser()
 
-    p_root           = config['DEFAULT']['p_root']
+    candidates = [ini_path, os.path.join(pwd_path, os.path.basename(ini_path))]
+
+    found      = config.read(candidates)
+
+    missing    = set(candidates) - set(found)
+
+    s_fn = ''
+    for item in enumerate (os.listdir(pwd_path)):
+        if item[1].endswith('.ini'):
+            s_fn += f"{item}\n"
+        # l_s_popup.append(("", item))
+    l_s_popup.append(("", s_fn))
+
+    for item in enumerate (missing):
+        if item[1].endswith('.ini'):
+            s_fn += f"{item}\n"
+        # l_s_popup.append(("", item))
+    l_s_popup.append(("missing", s_fn))
+
+    for item in enumerate (found):
+        if item[1].endswith('.ini'):
+            s_fn += f"{item}\n"
+        # l_s_popup.append(("", item))
+    l_s_popup.append(("found", s_fn))
+
+    show_info_popup(l_s_popup)
+
+    print('Found config files:', sorted(found))
+    print('Missing files     :', sorted(missing))
+
+    ################
+
+    config.read(ini_path, encoding='utf-8')
+
+    p_root           = Path(config['DEFAULT']['p_root'])
+    print(f"load_config(): {p_root = }")
     subdirs_raw      = config['DEFAULT']['lo_subdir']
-    lo_subdir        = [subdir.strip() for subdir in subdirs_raw.split(",")]
+    lo_subdir        = [Path(subdir.strip()) for subdir in subdirs_raw.split(",")]
+    print(f"load_config(): {lo_subdir = }")
 
-    dir_QA_cards     = config['DEFAULT']['dir_QA_cards']
+    dir_QA_cards     = Path(config['DEFAULT']['dir_QA_cards'])
+    print(f"load_config(): {dir_QA_cards = }")
     fn_QA_SR         = config['DEFAULT']['fn_QA_SR']
     fn_QA_anki       = config['DEFAULT']['fn_QA_anki']
 
@@ -231,6 +342,17 @@ def load_config(ini_path):
     rgx_d8_hash = r"_\d{8}"
 
     return p_root, ext, dir_QA_cards, SR_tag
+
+def resolve_path(s_filename: str) -> str:
+    """Helper to find files relative to the script/executable."""
+    if getattr(sys, 'frozen', False):
+        # Path of the .exe file
+        s_base_path = os.path.dirname(sys.executable)
+    else:
+        # Path of the .py file
+        s_base_path = os.path.dirname(os.path.abspath(__file__))
+
+    return os.path.join(s_base_path, s_filename)
 
 
 def remove_color_tags(text):
@@ -616,6 +738,7 @@ def get_lo_fn_path_with_extension(root, lo_subdir, ext):
         # print(f'>add_path():< {root_path = } ')
         # 'C:\\Users\\rh\\Meine Ablage\\obsidian_rh_GoogleDrive\\02_Notes_zotero_Annotations_anki\\bleasePaternalismus2016__Annotations__OK\\01_Notes_rh'
         # 'C:\\Users\\rh\\Meine Ablage\\obsidian_rh_GoogleDrive\\02_Notes_zotero_Annotations_anki\\bleasePaternalismus2016__Annotations__OK\\01_Notes_rh'
+        # print(f"\nadd_path(): {root_path = }")
         list_dir = os.listdir(os.path.normpath(root_path))
         # pprint(list_dir)
         for current_dir, _, filenames in os.walk(root_path):
@@ -931,7 +1054,7 @@ def get_lo_do_QA_merged(lo_do_qa_entry, lo_do_QA_SR):
     #   => new QA in obsidian note => append it to >lo_do_QA_merged<.
     for do_qa_entry in lo_do_qa_entry:
         if do_qa_entry["QA_ID"] not in so_QA_SR_QA_ID:
-            print ('>>> ', do_qa_entry["fn_QA"])
+            print ('get_lo_do_QA_merged(): entry added from file: ', '>' + do_qa_entry["fn_QA"] + '<')
             do_qa_entry['QA_tag'] = do_qa_entry['QA_tag'].replace(QA_tag, SR_tag)
             lo_do_QA_merged.append(do_qa_entry)
 
@@ -1086,15 +1209,27 @@ def write_QA_SR_file(lo_do_QA_merged):
         lo_do_QA_SR        = check_duplicates_lo_do_QA(lo_do_QA_SR)
         lo_do_QA_SR_sorted = sorted(lo_do_QA_SR, key=lambda x: (x["QA_tag"].lower()))
 
+        pattern = r'^(?:\?|\?\?)$'
+
         with open(p_fn_SR, 'w', encoding='utf-8') as f:
             for do_QA_SR in lo_do_QA_SR_sorted:
                 QA_ID = do_QA_SR.get("QA_ID", "")
+                QA_QA = do_QA_SR.get("QA", "")
                 QA_Q  = do_QA_SR.get("QA_Q", "")
                 QA_A  = do_QA_SR.get("QA_A", "")
+                print(f'{QA_Q = },  {QA_A = }')
+                if ((QA_Q.strip() == 'Q:') or (QA_A.strip() == 'A:')
+                        or (QA_Q.strip() == '') or (QA_A.strip() == '')) :
+                    continue
+                # search for '\n?\n'
+                matches = re.findall(pattern, QA_QA, flags=re.MULTILINE)
+                if not matches:
+                    QA_QA = QA_Q + '\n?\n' + QA_A
                 # print(QA_ID)
                 lines = [
                     str(do_QA_SR.get("QA_tag", "")),
-                    str(do_QA_SR.get("QA", "")),
+                    # str(do_QA_SR.get("QA", "")),
+                    str(QA_QA),
                     QA_separator,
                     # str(do_QA_SR.get("fn_QA", "")),
                     get_colorized_string(str(do_QA_SR.get("fn_QA", ""))),
@@ -1121,6 +1256,18 @@ def main():
     #  Therefor new QA-entries are appended to existing QA-file.)
 
     ini_path = 'tac.ini'
+
+
+    # l_s_popup = [("pwd", f"{pwd_path =}"), ("File (with path)", f"{p_fn_note_source}")]
+
+    # s_INI_FILE = resolve_path("make_OWS_route.ini")
+    # s_CSV_FILE = resolve_path("make_OWS_route.csv")
+
+    ini_path = resolve_path(ini_path)
+
+    l_s_popup = [("tac.exe", f"Starting"), ("ini_path", f"{ini_path = }")]
+    show_info_popup(l_s_popup)
+
     load_config(ini_path)
 
     # find all obsidian notes in >p_root< or in >lo_subdir< of >p_root< (both are globals defined in >tac.ini<):
